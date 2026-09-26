@@ -24,8 +24,8 @@ t.start()
 TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# معرف قناة المشرفين التي سيتم النشر فيها (اكتب معرف القناة، مثال: "@YourChannel" أو رقم القناة السالب)
-CHANNEL_ID = "ضع_معرف_قناة_المشرفين_هنا"
+# معرف قناة المشرفين المحددة
+CHANNEL_ID = "@m388393"
 
 # قاموس لتخزين حالة المحادثة لكل طالب
 user_states = {}
@@ -49,7 +49,6 @@ def send_message(chat_id, text, reply_markup=None):
         print(f"Send message error: {e}")
 
 def forward_or_copy_message(from_chat_id, message_id, caption_text):
-    # نسخ المحتوى أو الملف إلى قناة المشرفين مع التفاصيل
     payload = {
         "chat_id": CHANNEL_ID,
         "from_chat_id": from_chat_id,
@@ -88,13 +87,12 @@ while True:
                         user_username = f"@{user.get('username')}" if user.get("username") else "بدون معرف"
                         text = message.get("text")
                         
-                        # أمر البداية /start
+                        # أمر البداية /start أو إعادة الضبط
                         if text == "/start":
                             user_states[chat_id] = {"step": "waiting_module"}
-                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال المشاركات الطلبة.\nالرجاء كتابة اسم المقياس (المادة) أولاً:")
+                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\nالرجاء كتابة اسم المقياس (المادة) أولاً:")
                             continue
                             
-                        # تتبع الخطوات الحالية للطالب
                         if chat_id not in user_states:
                             user_states[chat_id] = {"step": "none"}
                             
@@ -116,12 +114,11 @@ while True:
                             send_message(chat_id, "رائع جداً.\nالآن أرسل الملف، المستند، الصورة، أو التسجيل الصوتي الخاص بالمشاركة:")
                             
                         elif current_state == "waiting_file":
-                            # استقبال الملف أو المحتوى أياً كان نوعه
                             module = user_states[chat_id].get("module", "غير محدد")
                             professor = user_states[chat_id].get("professor", "غير محدد")
                             doc_type = user_states[chat_id].get("doc_type", "غير محدد")
                             
-                            # تجهيز رسالة التنسيق للنشر في القناة بشكل مجهول مع الاحتفاظ بالمعرف كاحتياط
+                            # تنسيق الرسالة لتكون مجهولة مع إظهار المعرف للاحتياط
                             caption = (
                                 f"📄 مشاركة جديدة:\n\n"
                                 f"▪️ المقياس: {module}\n"
@@ -130,11 +127,9 @@ while True:
                                 f"👤 مرسل من: (مجهول) | المعرف: {user_username}"
                             )
                             
-                            # إعادة توجيه/نسخ الملف أو المحتوى لقناة المشرفين
                             forward_or_copy_message(chat_id, message["message_id"], caption)
                             
-                            # إعلام الطالب بتمام العملية وإعادة الضبط
-                            send_message(chat_id, "تم استلام مشاركتك وإرسالها إلى المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
+                            send_message(chat_id, "تم استلام مشاركتك وإرسالها إلى قناة المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
                             user_states[chat_id] = {"step": "none"}
                             
     except Exception as e:
