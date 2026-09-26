@@ -1,30 +1,17 @@
-import asyncio
 import logging
-import sys
 import os
-from aiogram import Bot, Dispatcher, html
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, executor, types
 
-# قراءة التوكن من المتغيرات البيئية في Render
 TOKEN = os.getenv("BOT_TOKEN")
 
-dp = Dispatcher()
+logging.basicConfig(level=logging.INFO)
 
-@dp.message(CommandStart())
-async def command_start_handler(message: Message) -> None:
-    await message.answer(f"مرحباً بك {html.bold(message.from_user.full_name)}! البوت يعمل الآن بنجاح من الاستضافة السحابية.")
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
-async def main() -> None:
-    if not TOKEN:
-        logging.error("لم يتم العثور على توكن البوت!")
-        return
-    bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    await dp.start_polling(bot)
+@dp.message_handler(commands=["start"])
+async def send_welcome(message: types.Message):
+    await message.reply("مرحباً بك! البوت يعمل الآن بنجاح على الاستضافة السحابية.")
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    asyncio.run(main())
-
+    executor.start_polling(dp, skip_updates=True)
