@@ -27,7 +27,7 @@ CHANNEL_ID = "@m388393"
 user_states = {}
 last_update_id = 0
 
-print("Reversed flow student bot started...")
+print("Stable Student Bot started...")
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text}
@@ -65,7 +65,7 @@ while True:
                 for update in data["result"]:
                     last_update_id = update["update_id"]
                     
-                    # التعامل مع الضغط على الأزرار
+                    # التعامل مع الضغط على زر إعادة المشاركة
                     if "callback_query" in update:
                         cq = update["callback_query"]
                         chat_id = cq["message"]["chat"]["id"]
@@ -92,28 +92,33 @@ while True:
                             
                         step = user_states[chat_id]["step"]
                         
-                        # أمر البدء
-                        if text == "/start" or step == "none":
+                        # أمر البدء أو إعادة التعيين
+                        if text == "/start":
                             user_states[chat_id] = {"step": "waiting_file"}
                             send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\n\nالرجاء إرسال ما تريد مشاركته (ملفات، صور، تسجيلات صوتية...) مباشرة:")
                             continue
                             
-                        # الخطوة 1: استقبال الملفات مباشرة أولاً
-                        if step == "waiting_file":
-                            # حفظ معرف رسالة الملف مؤقتاً أو نسخه فوراً للقناة مع تذييل المجهول
-                            caption = f"📄 مشاركة جديدة:\n👤 مرسل من: (مجهول) | المعرف: {username}"
-                            copy_message(chat_id, msg["message_id"], caption)
+                        # إذا أرسل ملفاً أو صورة أو تسجيلاً وهو في البداية أو ينتظر ملفاً
+                        if step == "none" or step == "completed":
+                            user_states[chat_id] = {"step": "waiting_file"}
                             
-                            user_states[chat_id]["step"] = "waiting_details"
-                            send_message(chat_id, "وصلنا، بارك الله فيك! 📥\nالآن اذكر لنا معلومات عن الملف (مثل: اسم المقياس، المحاضرة، الأستاذ، التاريخ، رقم الحصة، ونحوه):")
+                        if step == "waiting_file" and text != "/start":
+                            # التحقق مما إذا كانت الرسالة عبارة عن ملف/صورة/مستند/صوت وليست مجرد نص تفاصيل مبكر
+                            has_media = any(k in msg for k in ["document", "photo", "audio", "voice", "video", "video_note"])
                             
-                        # الخطوة 2: استقبال تفاصيل الملف ومعلوماته كخطوة أخيرة
+                            if has_media or (text and not text.startswith("/")):
+                                caption = f"📄 مشاركة جديدة:\n👤 مرسل من: (مجهول) | المعرف: {username}"
+                                copy_message(chat_id, msg["message_id"], caption)
+                                
+                                user_states[chat_id]["step"] = "waiting_details"
+                                send_message(chat_id, "وصلنا، بارك الله فيك! 📥\nالآن اذكر لنا معلومات عن الملف (مثل: اسم المقياس، المحاضرة، الأستاذ، التاريخ، رقم الحصة، ونحوه):")
+                                continue
+                            
+                        # استقبال تفاصيل الملف كخطوة أخيرة
                         elif step == "waiting_details":
-                            # إرسال تفاصيل الملف للقناة أيضاً
                             details_text = f"📝 تفاصيل المشاركة:\n{text}\n\n👤 المرسل: {username}"
                             send_message(CHANNEL_ID, details_text)
                             
-                            # زر إعادة المشاركة
                             keyboard = {
                                 "inline_keyboard": [
                                     [{"text": "🔄 إعادة المشاركة من جديد", "callback_data": "new_submission"}]
@@ -122,9 +127,6 @@ while True:
                             
                             send_message(chat_id, "بوركت وجزاك الله خيراً! تم نشر تفاصيل الملف بنجاح. 🌸", reply_markup=keyboard)
                             user_states[chat_id]["step"] = "completed"
-                            
-                        elif step == "completed":
-                            send_message(chat_id, "لقد أكملت مشاركتك السابقة. يرجى الضغط على زر (إعادة المشاركة من جديد) في الرسالة السابقة لرفع ملف جديد.")
                             
     except Exception as e:
         print(f"Error: {e}")
