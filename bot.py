@@ -23,126 +23,100 @@ t.start()
 
 TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
-
-# معرف قناة المشرفين
 CHANNEL_ID = "@m388393"
 
-# قاموس لتخزين حالة المحادثة لكل طالب
 user_states = {}
-
-print("Smart student submissions bot started...")
-
 last_update_id = 0
 
-def send_message(chat_id, text):
-    payload = {"chat_id": chat_id, "text": text}
-    req = urllib.request.Request(
-        f"{URL}/sendMessage",
-        data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'}
-    )
-    try:
-        urllib.request.urlopen(req)
-    except Exception as e:
-        print(f"Send message error: {e}")
+print("Bot is running perfectly...")
 
-def copy_message(from_chat_id, message_id, caption_text):
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "from_chat_id": from_chat_id,
-        "message_id": message_id,
-        "caption": caption_text
-    }
-    req = urllib.request.Request(
-        f"{URL}/copyMessage",
-        data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'}
-    )
+def send_message(chat_id, text):
+    data = json.dumps({"chat_id": chat_id, "text": text}).encode('utf-8')
+    req = urllib.request.Request(f"{URL}/sendMessage", data=data, headers={'Content-Type': 'application/json'})
     try:
         urllib.request.urlopen(req)
     except Exception as e:
-        print(f"Copy message error: {e}")
+        print(f"Error sending message: {e}")
+
+def copy_message(chat_id, message_id, caption):
+    data = json.dumps({
+        "chat_id": CHANNEL_ID,
+        "from_chat_id": chat_id,
+        "message_id": message_id,
+        "caption": caption
+    }).encode('utf-8')
+    req = urllib.request.Request(f"{URL}/copyMessage", data=data, headers={'Content-Type': 'application/json'})
+    try:
+        urllib.request.urlopen(req)
+    except Exception as e:
+        print(f"Error copying message: {e}")
 
 while True:
     try:
         req = urllib.request.Request(f"{URL}/getUpdates?offset={last_update_id + 1}&timeout=30")
         with urllib.request.urlopen(req, timeout=40) as response:
             data = json.loads(response.read().decode())
-            
             if "result" in data:
                 for update in data["result"]:
                     last_update_id = update["update_id"]
                     
                     if "message" in update:
-                        message = update["message"]
-                        chat_id = message["chat"]["id"]
+                        msg = update["message"]
+                        chat_id = msg["chat"]["id"]
                         
-                        # استقبال في المحادثات الخاصة حصراً
-                        if message["chat"]["type"] != "private":
+                        # المحادثات الخاصة فقط
+                        if msg["chat"]["type"] != "private":
                             continue
                             
-                        user = message.get("from", {})
-                        user_username = f"@{user.get('username')}" if user.get("username") else "بدون معرف"
-                        text = message.get("text")
+                        user = msg.get("from", {})
+                        username = f"@{user.get('username')}" if user.get("username") else "بدون معرف"
+                        text = msg.get("text")
                         
-                        # تهيئة حالة الطالب إذا لم تكن موجودة
+                        # أمر البدء
+                        if text == "/start":
+                            user_states[chat_id] = {"step": "module"}
+                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك. أرسل اسم المقياس (المادة) مباشرة:")
+                            continue
+                            
                         if chat_id not in user_states:
                             user_states[chat_id] = {"step": "none"}
                             
-                        current_state = user_states[chat_id]["step"]
+                        step = user_states[chat_id]["step"]
                         
-                        # أمر البداية /start أو إعادة الضبط في أي وقت
-                        if text == "/start":
-                            user_states[chat_id] = {"step": "waiting_module"}
-                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\nالرجاء كتابة اسم المقياس (المادة) مباشرة:")
-                            continue
+                        # الخطوة 1: استقبال اسم المقياس (أي كلمة يكتبها الطالب تُعتبر هي المادة فوراً)
+                        if step == "module":
+                            user_states[chat_id]["module"] = text or "مشاركة"
+                            user_states[chat_id]["step"] = "professor"
+                            send_message(chat_id, "تم تسجيل المقياس بنجاح.\nالآن، أرسل اسم الأستاذ:")
                             
-                        # الخطوة 1: استقبال اسم المقياس (يقبل أي كلمة يكتبها الطالب)
-                        if current_state == "waiting_module":
-                            if not text:
-                                send_message(chat_id, "الرجاء إرسال اسم المقياس كرسالة نصية:")
-                                continue
-                            user_states[chat_id]["module"] = text
-                            user_states[chat_id]["step"] = "waiting_professor"
-                            send_message(chat_id, f"تم تسجيل المقياس ({text}).\nالآن، يرجى كتابة اسم الأستاذ المسؤول:")
+                        # الخطوة 2: استقبال اسم الأستاذ
+                        elif step == "professor":
+                            user_states[chat_id]["professor"] = text or "غير محدد"
+                            user_states[chat_id]["step"] = "doc_type"
+                            send_message(chat_id, "ممتاز. ما هو نوع المستند؟ (مثال: ملخص، محاضرة، امتحان...):")
                             
-                        # الخطوة 2: استقبال اسم الأستاذ (يقبل أي نص)
-                        elif current_state == "waiting_professor":
-                            if not text:
-                                send_message(chat_id, "الرجاء إرسال اسم الأستاذ كرسالة نصية:")
-                                continue
-                            user_states[chat_id]["professor"] = text
-                            user_states[chat_id]["step"] = "waiting_doc_type"
-                            send_message(chat_id, "ممتاز. ما هو نوع المستند أو المطبوعة؟ (مثال: ملخص، محاضرة، امتحان...):")
+                        # الخطوة 3: استقبال نوع المستند
+                        elif step == "doc_type":
+                            user_states[chat_id]["doc_type"] = text or "غير محدد"
+                            user_states[chat_id]["step"] = "file"
+                            send_message(chat_id, "رائع جداً.\nالآن أرسل الملف أو المحتوى مباشرة:")
                             
-                        # الخطوة 3: استقبال نوع المستند (يقبل أي نص)
-                        elif current_state == "waiting_doc_type":
-                            if not text:
-                                send_message(chat_id, "الرجاء إرسال نوع المستند كرسالة نصية:")
-                                continue
-                            user_states[chat_id]["doc_type"] = text
-                            user_states[chat_id]["step"] = "waiting_file"
-                            send_message(chat_id, "رائع جداً.\nالآن أرسل الملف، المستند، الصورة، أو التسجيل الصوتي الخاص بالمشاركة:")
+                        # الخطوة 4: استقبال الملف ونشره
+                        elif step == "file":
+                            mod = user_states[chat_id].get("module", "-")
+                            prof = user_states[chat_id].get("professor", "-")
+                            dtype = user_states[chat_id].get("doc_type", "-")
                             
-                        # الخطوة 4: استقبال الملف النهائي أياً كان نوعه
-                        elif current_state == "waiting_file":
-                            module = user_states[chat_id].get("module", "غير محدد")
-                            professor = user_states[chat_id].get("professor", "غير محدد")
-                            doc_type = user_states[chat_id].get("doc_type", "غير محدد")
-                            
-                            # تنسيق الرسالة لتكون مجهولة مع إظهار المعرف للاحتياط
                             caption = (
                                 f"📄 مشاركة جديدة:\n\n"
-                                f"▪️ المقياس: {module}\n"
-                                f"▪️ الأستاذ: {professor}\n"
-                                f"▪️ النوع: {doc_type}\n\n"
-                                f"👤 مرسل من: (مجهول) | المعرف: {user_username}"
+                                f"▪️ المقياس: {mod}\n"
+                                f"▪️ الأستاذ: {prof}\n"
+                                f"▪️ النوع: {dtype}\n\n"
+                                f"👤 مرسل من: (مجهول) | المعرف: {username}"
                             )
                             
-                            # نسخ الملف أو المحتوى لقناة المشرفين مع التفاصيل
-                            copy_message(chat_id, message["message_id"], caption)
-                            
-                            send_message(chat_id, "تم استلام مشاركتك وإرسالها إلى قناة المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
+                            copy_message(chat_id, msg["message_id"], caption)
+                            send_message(chat_id, "تم استلام مشاركتك ونشرها عند المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
                             user_states[chat_id] = {"step": "none"}
                             
     except Exception as e:
