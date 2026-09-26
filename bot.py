@@ -25,9 +25,10 @@ URL = f"https://api.telegram.org/bot{TOKEN}"
 CHANNEL_ID = "@m388393"
 
 user_states = {}
+processed_updates = set()  # لتفادي تكرار معالجة نفس التحديث
 last_update_id = 0
 
-print("Stable Student Bot started...")
+print("Anti-Duplicate Student Bot started...")
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text}
@@ -63,9 +64,18 @@ while True:
             data = json.loads(response.read().decode())
             if "result" in data:
                 for update in data["result"]:
-                    last_update_id = update["update_id"]
+                    update_id = update["update_id"]
+                    last_update_id = update_id
                     
-                    # التعامل مع الضغط على زر إعادة المشاركة
+                    if update_id in processed_updates:
+                        continue
+                    processed_updates.add(update_id)
+                    
+                    # تنظيف الذاكرة القديمة للمتغير للحفاظ على خفة البوت
+                    if len(processed_updates) > 500:
+                        processed_updates.clear()
+                    
+                    # التعامل مع الضغط على الأزرار
                     if "callback_query" in update:
                         cq = update["callback_query"]
                         chat_id = cq["message"]["chat"]["id"]
@@ -88,7 +98,7 @@ while True:
                         text = msg.get("text", "")
                         
                         if chat_id not in user_states:
-                            user_states[chat_id] = {"step": "none"}
+                            user_states[chat_id] = {"step": "waiting_file"}
                             
                         step = user_states[chat_id]["step"]
                         
@@ -98,12 +108,12 @@ while True:
                             send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\n\nالرجاء إرسال ما تريد مشاركته (ملفات، صور، تسجيلات صوتية...) مباشرة:")
                             continue
                             
-                        # إذا أرسل ملفاً أو صورة أو تسجيلاً وهو في البداية أو ينتظر ملفاً
                         if step == "none" or step == "completed":
                             user_states[chat_id] = {"step": "waiting_file"}
+                            step = "waiting_file"
                             
-                        if step == "waiting_file" and text != "/start":
-                            # التحقق مما إذا كانت الرسالة عبارة عن ملف/صورة/مستند/صوت وليست مجرد نص تفاصيل مبكر
+                        # الخطوة 1: استقبال الملف أولاً
+                        if step == "waiting_file":
                             has_media = any(k in msg for k in ["document", "photo", "audio", "voice", "video", "video_note"])
                             
                             if has_media or (text and not text.startswith("/")):
@@ -114,8 +124,10 @@ while True:
                                 send_message(chat_id, "وصلنا، بارك الله فيك! 📥\nالآن اذكر لنا معلومات عن الملف (مثل: اسم المقياس، المحاضرة، الأستاذ، التاريخ، رقم الحصة، ونحوه):")
                                 continue
                             
-                        # استقبال تفاصيل الملف كخطوة أخيرة
+                        # الخطوة 2: استقبال التفاصيل لمرة واحدة فقط
                         elif step == "waiting_details":
+                            user_states[chat_id]["step"] = "completed"  # تغيير الحالة فوراً لمنع أي تكرار
+                            
                             details_text = f"📝 تفاصيل المشاركة:\n{text}\n\n👤 المرسل: {username}"
                             send_message(CHANNEL_ID, details_text)
                             
@@ -126,7 +138,6 @@ while True:
                             }
                             
                             send_message(chat_id, "بوركت وجزاك الله خيراً! تم نشر تفاصيل الملف بنجاح. 🌸", reply_markup=keyboard)
-                            user_states[chat_id]["step"] = "completed"
                             
     except Exception as e:
         print(f"Error: {e}")
