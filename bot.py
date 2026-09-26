@@ -5,7 +5,6 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# خادم الويب الوهمي لإبقاء البوت قيد التشغيل على Render
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -28,23 +27,29 @@ CHANNEL_ID = "@m388393"
 user_states = {}
 last_update_id = 0
 
-print("Bot is running perfectly...")
+print("Reversed flow student bot started...")
 
-def send_message(chat_id, text):
-    data = json.dumps({"chat_id": chat_id, "text": text}).encode('utf-8')
+def send_message(chat_id, text, reply_markup=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(f"{URL}/sendMessage", data=data, headers={'Content-Type': 'application/json'})
     try:
         urllib.request.urlopen(req)
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def copy_message(chat_id, message_id, caption):
-    data = json.dumps({
+def copy_message(chat_id, message_id, caption=""):
+    payload = {
         "chat_id": CHANNEL_ID,
         "from_chat_id": chat_id,
-        "message_id": message_id,
-        "caption": caption
-    }).encode('utf-8')
+        "message_id": message_id
+    }
+    if caption:
+        payload["caption"] = caption
+        
+    data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(f"{URL}/copyMessage", data=data, headers={'Content-Type': 'application/json'})
     try:
         urllib.request.urlopen(req)
@@ -60,65 +65,67 @@ while True:
                 for update in data["result"]:
                     last_update_id = update["update_id"]
                     
+                    # التعامل مع الضغط على الأزرار
+                    if "callback_query" in update:
+                        cq = update["callback_query"]
+                        chat_id = cq["message"]["chat"]["id"]
+                        data_val = cq["data"]
+                        
+                        if data_val == "new_submission":
+                            user_states[chat_id] = {"step": "waiting_file"}
+                            send_message(chat_id, "حياك الله من جديد! 📚\nالرجاء إرسال الملفات أو الصور أو التسجيلات التي تريد مشاركتها مباشرة:")
+                        continue
+
                     if "message" in update:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
                         
-                        # المحادثات الخاصة فقط
                         if msg["chat"]["type"] != "private":
                             continue
                             
                         user = msg.get("from", {})
                         username = f"@{user.get('username')}" if user.get("username") else "بدون معرف"
-                        text = msg.get("text")
+                        text = msg.get("text", "")
                         
-                        # أمر البدء
-                        if text == "/start":
-                            user_states[chat_id] = {"step": "module"}
-                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك. أرسل اسم المقياس (المادة) مباشرة:")
-                            continue
-                            
                         if chat_id not in user_states:
                             user_states[chat_id] = {"step": "none"}
                             
                         step = user_states[chat_id]["step"]
                         
-                        # الخطوة 1: استقبال اسم المقياس (أي كلمة يكتبها الطالب تُعتبر هي المادة فوراً)
-                        if step == "module":
-                            user_states[chat_id]["module"] = text or "مشاركة"
-                            user_states[chat_id]["step"] = "professor"
-                            send_message(chat_id, "تم تسجيل المقياس بنجاح.\nالآن، أرسل اسم الأستاذ:")
+                        # أمر البدء
+                        if text == "/start" or step == "none":
+                            user_states[chat_id] = {"step": "waiting_file"}
+                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\n\nالرجاء إرسال ما تريد مشاركته (ملفات، صور، تسجيلات صوتية...) مباشرة:")
+                            continue
                             
-                        # الخطوة 2: استقبال اسم الأستاذ
-                        elif step == "professor":
-                            user_states[chat_id]["professor"] = text or "غير محدد"
-                            user_states[chat_id]["step"] = "doc_type"
-                            send_message(chat_id, "ممتاز. ما هو نوع المستند؟ (مثال: ملخص، محاضرة، امتحان...):")
-                            
-                        # الخطوة 3: استقبال نوع المستند
-                        elif step == "doc_type":
-                            user_states[chat_id]["doc_type"] = text or "غير محدد"
-                            user_states[chat_id]["step"] = "file"
-                            send_message(chat_id, "رائع جداً.\nالآن أرسل الملف أو المحتوى مباشرة:")
-                            
-                        # الخطوة 4: استقبال الملف ونشره
-                        elif step == "file":
-                            mod = user_states[chat_id].get("module", "-")
-                            prof = user_states[chat_id].get("professor", "-")
-                            dtype = user_states[chat_id].get("doc_type", "-")
-                            
-                            caption = (
-                                f"📄 مشاركة جديدة:\n\n"
-                                f"▪️ المقياس: {mod}\n"
-                                f"▪️ الأستاذ: {prof}\n"
-                                f"▪️ النوع: {dtype}\n\n"
-                                f"👤 مرسل من: (مجهول) | المعرف: {username}"
-                            )
-                            
+                        # الخطوة 1: استقبال الملفات مباشرة أولاً
+                        if step == "waiting_file":
+                            # حفظ معرف رسالة الملف مؤقتاً أو نسخه فوراً للقناة مع تذييل المجهول
+                            caption = f"📄 مشاركة جديدة:\n👤 مرسل من: (مجهول) | المعرف: {username}"
                             copy_message(chat_id, msg["message_id"], caption)
-                            send_message(chat_id, "تم استلام مشاركتك ونشرها عند المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
-                            user_states[chat_id] = {"step": "none"}
+                            
+                            user_states[chat_id]["step"] = "waiting_details"
+                            send_message(chat_id, "وصلنا، بارك الله فيك! 📥\nالآن اذكر لنا معلومات عن الملف (مثل: اسم المقياس، المحاضرة، الأستاذ، التاريخ، رقم الحصة، ونحوه):")
+                            
+                        # الخطوة 2: استقبال تفاصيل الملف ومعلوماته كخطوة أخيرة
+                        elif step == "waiting_details":
+                            # إرسال تفاصيل الملف للقناة أيضاً
+                            details_text = f"📝 تفاصيل المشاركة:\n{text}\n\n👤 المرسل: {username}"
+                            send_message(CHANNEL_ID, details_text)
+                            
+                            # زر إعادة المشاركة
+                            keyboard = {
+                                "inline_keyboard": [
+                                    [{"text": "🔄 إعادة المشاركة من جديد", "callback_data": "new_submission"}]
+                                ]
+                            }
+                            
+                            send_message(chat_id, "بوركت وجزاك الله خيراً! تم نشر تفاصيل الملف بنجاح. 🌸", reply_markup=keyboard)
+                            user_states[chat_id]["step"] = "completed"
+                            
+                        elif step == "completed":
+                            send_message(chat_id, "لقد أكملت مشاركتك السابقة. يرجى الضغط على زر (إعادة المشاركة من جديد) في الرسالة السابقة لرفع ملف جديد.")
                             
     except Exception as e:
         print(f"Error: {e}")
-        time.sleep(5)
+        time.sleep(3)
