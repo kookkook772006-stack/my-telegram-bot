@@ -1,16 +1,11 @@
 import os
-import asyncio
-import logging
+import time
+import json
+import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart
-from aiogram.fsm.state import State,StatesGroup
-from aiogram.fsm.context import FSMContext
-
-# إعداد خادم الويب الوهمي لتلبية شروط منصة Render وإبقاء البوت قيد التشغيل
+# خادم الويب الوهمي لإبقاء البوت قيد التشغيل على Render
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -22,107 +17,126 @@ def run_web_server():
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
     server.serve_forever()
 
-# تشغيل خادم الويب في خلفية النظام
-web_thread = threading.Thread(target=run_web_server)
-web_thread.daemon = True
-web_thread.start()
+t = threading.Thread(target=run_web_server)
+t.daemon = True
+t.start()
 
-# إعدادات البوت
-TOKEN = os.getenv("BOT_TOKEN", "8602792772:AAEg8qIlzMd1kBuuTjlPdmvdaV3AlBmjVa4")
-LOG_GROUP_ID = -1004448279953
+TOKEN = os.getenv("BOT_TOKEN")
+URL = f"https://api.telegram.org/bot{TOKEN}"
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+# معرف قناة المشرفين التي سيتم النشر فيها (اكتب معرف القناة، مثال: "@YourChannel" أو رقم القناة السالب)
+CHANNEL_ID = "ضع_معرف_قناة_المشرفين_هنا"
 
-class SubmissionForm(StatesGroup):
-    waiting_for_module = State()
-    waiting_for_professor = State()
-    waiting_for_doc_type = State()
-    waiting_for_file = State()
+# قاموس لتخزين حالة المحادثة لكل طالب
+user_states = {}
 
-def get_restart_keyboard():
-    button = InlineKeyboardButton(text="🔄 إرسال مشاركة أخرى", callback_data="restart_submission")
-    return InlineKeyboardMarkup(inline_keyboard=[[button]])
+print("Advanced student submissions bot started...")
 
-@dp.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
-    welcome_text = (
-        "حياك الله يا أخي الكريم!\n\n"
-        "مرحباً بك في بوت استقبال المشاركات والملفات الدراسية.\n"
-        "للبدء في إرسال مشاركتك، يرجى كتابة **اسم المقياس (المادة)** أولاً:"
+last_update_id = 0
+
+def send_message(chat_id, text, reply_markup=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    req = urllib.request.Request(
+        f"{URL}/sendMessage",
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'}
     )
-    await message.answer(welcome_text)
-    await state.set_state(SubmissionForm.waiting_for_module)
-
-@dp.callback_query(F.data == "restart_submission")
-async def restart_callback(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("🔄 حسناً، نبدأ مشاركة جديدة.\n\nيرجى كتابة **اسم المقياس (المادة)** أولاً:")
-    await state.set_state(SubmissionForm.waiting_for_module)
-    await callback.answer()
-
-@dp.message(SubmissionForm.waiting_for_module)
-async def process_module(message: Message, state: FSMContext):
-    await state.update_data(module=message.text)
-    await message.answer("تمام. الآن، من هو **أستاذ المقياس**؟")
-    await state.set_state(SubmissionForm.waiting_for_professor)
-
-@dp.message(SubmissionForm.waiting_for_professor)
-async def process_professor(message: Message, state: FSMContext):
-    await state.update_data(professor=message.text)
-    await message.answer("ممتاز. ما هو **نوع المطبوعة أو المحاضرة**؟ (مثلاً: محاضرة رقم 1، ملخص، تمرين...)")
-    await state.set_state(SubmissionForm.waiting_for_doc_type)
-
-@dp.message(SubmissionForm.waiting_for_doc_type)
-async def process_doc_type(message: Message, state: FSMContext):
-    await state.update_data(doc_type=message.text)
-    await message.answer("بارك الله فيك. الآن **أرسل الملف أو المستند أو الصور أو التسجيل الصوتي** الخاص بمشاركتك:")
-    await state.set_state(SubmissionForm.waiting_for_file)
-
-@dp.message(SubmissionForm.waiting_for_file, F.chat.type == "private")
-async def process_file_and_finish(message: Message, state: FSMContext):
-    user_data = await state.get_data()
-    module = user_data.get("module")
-    professor = user_data.get("professor")
-    doc_type = user_data.get("doc_type")
-
-    student_name = message.from_user.full_name
-    student_id = message.from_user.id
-    username = f"@{message.from_user.username}" if message.from_user.username else "لا يوجد"
-
-    # صياغة الرسالة التي ستصل إلى مجموعة الإدارة أو المشرفين
-    caption = (
-        "📥 **مشاركة جديدة من طالب:**\n\n"
-        f"📚 **المقياس:** {module}\n"
-        f"👨‍🏫 **الأستاذ:** {professor}\n"
-        f"📄 **نوع المطبوعة:** {doc_type}\n\n"
-        f"👤 **الطالب:** {student_name}\n"
-        f"🆔 **المعرف:** `{student_id}` ({username})"
-    )
-
     try:
-        # إعادة توجيه الملف أو الرسالة إلى مجموعة الإدارة
-        if LOG_GROUP_ID:
-            await message.forward(chat_id=LOG_GROUP_ID)
-            await bot.send_message(chat_id=LOG_GROUP_ID, text=caption, parse_mode="Markdown")
-
-        # إعلام الطالب بنجاح الإرسال
-        await message.answer(
-            "✅ جزاك الله خيراً! تم إرسال مشاركتك إلى الإدارة بنجاح.",
-            reply_markup=get_restart_keyboard()
-        )
+        urllib.request.urlopen(req)
     except Exception as e:
-        logging.error(f"Error forwarding message: {e}")
-        await message.answer("⚠️ حدث خطأ أثناء إرسال المشاركة، يرجى المحاولة لاحقاً.")
-    
-    await state.clear()
+        print(f"Send message error: {e}")
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    print("✨ Bot is starting with aiogram...")
-    # حذف أي Webhook قديم والبدء في استقبال التحديثات عبر Polling
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+def forward_or_copy_message(from_chat_id, message_id, caption_text):
+    # نسخ المحتوى أو الملف إلى قناة المشرفين مع التفاصيل
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "from_chat_id": from_chat_id,
+        "message_id": message_id,
+        "caption": caption_text
+    }
+    req = urllib.request.Request(
+        f"{URL}/copyMessage",
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'}
+    )
+    try:
+        urllib.request.urlopen(req)
+    except Exception as e:
+        print(f"Copy message error: {e}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+while True:
+    try:
+        req = urllib.request.Request(f"{URL}/getUpdates?offset={last_update_id + 1}&timeout=30")
+        with urllib.request.urlopen(req, timeout=40) as response:
+            data = json.loads(response.read().decode())
+            
+            if "result" in data:
+                for update in data["result"]:
+                    last_update_id = update["update_id"]
+                    
+                    if "message" in update:
+                        message = update["message"]
+                        chat_id = message["chat"]["id"]
+                        
+                        # استقبال في المحادثات الخاصة حصراً
+                        if message["chat"]["type"] != "private":
+                            continue
+                            
+                        user = message.get("from", {})
+                        user_username = f"@{user.get('username')}" if user.get("username") else "بدون معرف"
+                        text = message.get("text")
+                        
+                        # أمر البداية /start
+                        if text == "/start":
+                            user_states[chat_id] = {"step": "waiting_module"}
+                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال المشاركات الطلبة.\nالرجاء كتابة اسم المقياس (المادة) أولاً:")
+                            continue
+                            
+                        # تتبع الخطوات الحالية للطالب
+                        if chat_id not in user_states:
+                            user_states[chat_id] = {"step": "none"}
+                            
+                        current_state = user_states[chat_id]["step"]
+                        
+                        if current_state == "waiting_module":
+                            user_states[chat_id]["module"] = text
+                            user_states[chat_id]["step"] = "waiting_professor"
+                            send_message(chat_id, "حسناً، تم تسجيل المقياس.\nالآن، يرجى كتابة اسم الأستاذ المسؤول عن المادة:")
+                            
+                        elif current_state == "waiting_professor":
+                            user_states[chat_id]["professor"] = text
+                            user_states[chat_id]["step"] = "waiting_doc_type"
+                            send_message(chat_id, "ممتاز. ما هو نوع المستند أو المطبوعة؟ (مثال: ملخص، محاضرة، امتحان، تسجيل صوتي... الخ):")
+                            
+                        elif current_state == "waiting_doc_type":
+                            user_states[chat_id]["doc_type"] = text
+                            user_states[chat_id]["step"] = "waiting_file"
+                            send_message(chat_id, "رائع جداً.\nالآن أرسل الملف، المستند، الصورة، أو التسجيل الصوتي الخاص بالمشاركة:")
+                            
+                        elif current_state == "waiting_file":
+                            # استقبال الملف أو المحتوى أياً كان نوعه
+                            module = user_states[chat_id].get("module", "غير محدد")
+                            professor = user_states[chat_id].get("professor", "غير محدد")
+                            doc_type = user_states[chat_id].get("doc_type", "غير محدد")
+                            
+                            # تجهيز رسالة التنسيق للنشر في القناة بشكل مجهول مع الاحتفاظ بالمعرف كاحتياط
+                            caption = (
+                                f"📄 مشاركة جديدة:\n\n"
+                                f"▪️ المقياس: {module}\n"
+                                f"▪️ الأستاذ: {professor}\n"
+                                f"▪️ النوع: {doc_type}\n\n"
+                                f"👤 مرسل من: (مجهول) | المعرف: {user_username}"
+                            )
+                            
+                            # إعادة توجيه/نسخ الملف أو المحتوى لقناة المشرفين
+                            forward_or_copy_message(chat_id, message["message_id"], caption)
+                            
+                            # إعلام الطالب بتمام العملية وإعادة الضبط
+                            send_message(chat_id, "تم استلام مشاركتك وإرسالها إلى المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
+                            user_states[chat_id] = {"step": "none"}
+                            
+    except Exception as e:
+        print(f"Error: {e}")
+        time.sleep(5)
