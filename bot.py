@@ -24,20 +24,18 @@ t.start()
 TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# معرف قناة المشرفين المحددة
+# معرف قناة المشرفين
 CHANNEL_ID = "@m388393"
 
 # قاموس لتخزين حالة المحادثة لكل طالب
 user_states = {}
 
-print("Advanced student submissions bot started...")
+print("Smart student submissions bot started...")
 
 last_update_id = 0
 
-def send_message(chat_id, text, reply_markup=None):
+def send_message(chat_id, text):
     payload = {"chat_id": chat_id, "text": text}
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
     req = urllib.request.Request(
         f"{URL}/sendMessage",
         data=json.dumps(payload).encode('utf-8'),
@@ -48,7 +46,7 @@ def send_message(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"Send message error: {e}")
 
-def forward_or_copy_message(from_chat_id, message_id, caption_text):
+def copy_message(from_chat_id, message_id, caption_text):
     payload = {
         "chat_id": CHANNEL_ID,
         "from_chat_id": from_chat_id,
@@ -87,32 +85,46 @@ while True:
                         user_username = f"@{user.get('username')}" if user.get("username") else "بدون معرف"
                         text = message.get("text")
                         
-                        # أمر البداية /start أو إعادة الضبط
-                        if text == "/start":
-                            user_states[chat_id] = {"step": "waiting_module"}
-                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\nالرجاء كتابة اسم المقياس (المادة) أولاً:")
-                            continue
-                            
+                        # تهيئة حالة الطالب إذا لم تكن موجودة
                         if chat_id not in user_states:
                             user_states[chat_id] = {"step": "none"}
                             
                         current_state = user_states[chat_id]["step"]
                         
+                        # أمر البداية /start أو إعادة الضبط في أي وقت
+                        if text == "/start":
+                            user_states[chat_id] = {"step": "waiting_module"}
+                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\nالرجاء كتابة اسم المقياس (المادة) مباشرة:")
+                            continue
+                            
+                        # الخطوة 1: استقبال اسم المقياس (يقبل أي كلمة يكتبها الطالب)
                         if current_state == "waiting_module":
+                            if not text:
+                                send_message(chat_id, "الرجاء إرسال اسم المقياس كرسالة نصية:")
+                                continue
                             user_states[chat_id]["module"] = text
                             user_states[chat_id]["step"] = "waiting_professor"
-                            send_message(chat_id, "حسناً، تم تسجيل المقياس.\nالآن، يرجى كتابة اسم الأستاذ المسؤول عن المادة:")
+                            send_message(chat_id, f"تم تسجيل المقياس ({text}).\nالآن، يرجى كتابة اسم الأستاذ المسؤول:")
                             
+                        # الخطوة 2: استقبال اسم الأستاذ (يقبل أي نص)
                         elif current_state == "waiting_professor":
+                            if not text:
+                                send_message(chat_id, "الرجاء إرسال اسم الأستاذ كرسالة نصية:")
+                                continue
                             user_states[chat_id]["professor"] = text
                             user_states[chat_id]["step"] = "waiting_doc_type"
-                            send_message(chat_id, "ممتاز. ما هو نوع المستند أو المطبوعة؟ (مثال: ملخص، محاضرة، امتحان، تسجيل صوتي... الخ):")
+                            send_message(chat_id, "ممتاز. ما هو نوع المستند أو المطبوعة؟ (مثال: ملخص، محاضرة، امتحان...):")
                             
+                        # الخطوة 3: استقبال نوع المستند (يقبل أي نص)
                         elif current_state == "waiting_doc_type":
+                            if not text:
+                                send_message(chat_id, "الرجاء إرسال نوع المستند كرسالة نصية:")
+                                continue
                             user_states[chat_id]["doc_type"] = text
                             user_states[chat_id]["step"] = "waiting_file"
                             send_message(chat_id, "رائع جداً.\nالآن أرسل الملف، المستند، الصورة، أو التسجيل الصوتي الخاص بالمشاركة:")
                             
+                        # الخطوة 4: استقبال الملف النهائي أياً كان نوعه
                         elif current_state == "waiting_file":
                             module = user_states[chat_id].get("module", "غير محدد")
                             professor = user_states[chat_id].get("professor", "غير محدد")
@@ -127,7 +139,8 @@ while True:
                                 f"👤 مرسل من: (مجهول) | المعرف: {user_username}"
                             )
                             
-                            forward_or_copy_message(chat_id, message["message_id"], caption)
+                            # نسخ الملف أو المحتوى لقناة المشرفين مع التفاصيل
+                            copy_message(chat_id, message["message_id"], caption)
                             
                             send_message(chat_id, "تم استلام مشاركتك وإرسالها إلى قناة المشرفين بنجاح. جزاك الله خيراً! لرفع مشاركة أخرى أرسل /start")
                             user_states[chat_id] = {"step": "none"}
