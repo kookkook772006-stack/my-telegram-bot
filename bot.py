@@ -5,6 +5,7 @@ import telebot
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_GROUP = "-1004332853451"  # مجموعة الإدارة
+ADMIN_ID = 7049545419  # رقمك التعريفي الخاص كمدير
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
 app = Flask(__name__)
@@ -117,7 +118,7 @@ def callback_query(call):
         
         markup = telebot.types.InlineKeyboardMarkup()
         markup.add(telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
-        bot.send_message(chat_id, f"✅ **تم ضبط التصنيف بنجاح:**\n📚 المقياس: {chosen_subj}\n\n📥 **الآن أرسل ملفاتك تباعاً (مستند، صوت، فيديو...) وسيتم إرسالها للإدارة بنفس التصنيف. عندما تنتهي اضغط (تم، إنهاء)!**", reply_markup=markup)
+        bot.send_message(chat_id, f"✅ **تم ضبط التصنيف بنجاح:**\n📚 المقياس: {chosen_subj}\n\n📥 **الآن أرسل ملفاتك تباعاً (مستند، صوت، فيديو...). عندما تنتهي اضغط (تم، إنهاء)!**", reply_markup=markup)
         
     elif data == "more_files":
         user_states[chat_id]["step"] = "waiting_for_file"
@@ -131,7 +132,7 @@ def callback_query(call):
             telebot.types.InlineKeyboardButton("➕ مشاركة ملفات جديدة", callback_data="btn_share"),
             telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
         )
-        bot.send_message(chat_id, "✅ **تم إنهاء عملية رفع الملفات بنجاح. شكراً لمساهمتك العطرة!**", reply_markup=markup)
+        bot.send_message(chat_id, "✅ **تم إنهاء عملية رفع الملفات بنجاح.**", reply_markup=markup)
         
     elif data == "btn_get":
         markup = telebot.types.InlineKeyboardMarkup()
@@ -291,6 +292,9 @@ def handle_files(message):
         
     unique_key = str(message.message_id)
     
+    # تحقق مما إذا كان المرسل هو المدير (أنت)
+    is_admin = (chat_id == ADMIN_ID)
+    
     db = load_db()
     new_item = {
         "unique_key": unique_key,
@@ -300,40 +304,46 @@ def handle_files(message):
         "type": f_type,
         "sender": username,
         "student_chat_id": chat_id,
-        "status": "pending"
+        "status": "approved" if is_admin else "pending"  # قبول فوري إذا كنت أنت المدير
     }
     db.append(new_item)
     save_db(db)
     
-    caption = (
-        f"📥 **طلب مشاركة جديد للمراجعة:**\n\n"
-        f"📚 المقياس: {subj}\n"
-        f"🎓 السنة: {year} - السداسي {sem}\n"
-        f"🏷️ النوع: {f_type}\n"
-        f"👤 الطالب: {username} (ID: `{chat_id}`)"
+    markup_student = telebot.types.InlineKeyboardMarkup()
+    markup_student.add(
+        telebot.types.InlineKeyboardButton("➕ إضافة ملف آخر لنفس التصنيف", callback_data="more_files"),
+        telebot.types.InlineKeyboardButton("✅ تم، إنهاء", callback_data="finish_files"),
+        telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
     )
     
-    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        telebot.types.InlineKeyboardButton("✅ قبول ونشر", callback_data=f"accept_{unique_key}"),
-        telebot.types.InlineKeyboardButton("❌ رفض مع سبب", callback_data=f"ask_reject_{unique_key}"),
-        telebot.types.InlineKeyboardButton("🔄 تعديل التصنيف", callback_data=f"chg_subj_{unique_key}")
-    )
-    
-    try:
-        bot.forward_message(chat_id=ADMIN_GROUP, from_chat_id=chat_id, message_id=message.message_id)
-        bot.send_message(ADMIN_GROUP, caption, reply_markup=markup, parse_mode="Markdown")
-        
-        markup_student = telebot.types.InlineKeyboardMarkup()
-        markup_student.add(
-            telebot.types.InlineKeyboardButton("➕ إضافة ملف آخر لنفس التصنيف", callback_data="more_files"),
-            telebot.types.InlineKeyboardButton("✅ تم، إنهاء", callback_data="finish_files"),
-            telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
+    if is_admin:
+        # إذا كنت أنت المدير، يتم نشره فوراً ولا يذهب لمجموعة المراجعة
+        bot.send_message(chat_id, f"⚡ **أهلاً بك يا عبد الحق (المدير):**\nتم نشر الملف مباشرة في مقياس ({subj}) وتجاوز مرحلة المراجعة بنجاح! ✅\n\nهل تريد إضافة ملف آخر لنفس التصنيف أم تنتهي؟", reply_markup=markup_student)
+    else:
+        # باقي الطلاب يذهب طلبهم للمجموعة للمراجعة
+        caption = (
+            f"📥 **طلب مشاركة جديد للمراجعة:**\n\n"
+            f"📚 المقياس: {subj}\n"
+            f"🎓 السنة: {year} - السداسي {sem}\n"
+            f"🏷️ النوع: {f_type}\n"
+            f"👤 الطالب: {username} (ID: `{chat_id}`)"
         )
-        bot.send_message(chat_id, f"✅ **تم استلام الملف وإرساله للإدارة تحت مقياس ({subj}).**\nهل تريد إضافة ملف آخر بنفس التصنيف أم تنتهي؟", reply_markup=markup_student)
-    except Exception as e:
-        print(f"Error forwarding: {e}")
-        bot.send_message(chat_id, "✅ **تم إرسال الملف للمجموعة بنجاح.**")
+        
+        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            telebot.types.InlineKeyboardButton("✅ قبول ونشر", callback_data=f"accept_{unique_key}"),
+            telebot.types.InlineKeyboardButton("❌ رفض مع سبب", callback_data=f"ask_reject_{unique_key}"),
+            telebot.types.InlineKeyboardButton("🔄 تعديل التصنيف", callback_data=f"chg_subj_{unique_key}")
+        )
+        
+        try:
+            bot.forward_message(chat_id=ADMIN_GROUP, from_chat_id=chat_id, message_id=message.message_id)
+            bot.send_message(ADMIN_GROUP, caption, reply_markup=markup, parse_mode="Markdown")
+            
+            bot.send_message(chat_id, f"✅ **تم استلام الملف وإرساله للإدارة تحت مقياس ({subj}).**\nهل تريد إضافة ملف آخر بنفس التصنيف أم تنتهي؟", reply_markup=markup_student)
+        except Exception as e:
+            print(f"Error forwarding: {e}")
+            bot.send_message(chat_id, "✅ **تم إرسال الملف للمجموعة بنجاح.**")
 
 if __name__ == "__main__":
     RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
