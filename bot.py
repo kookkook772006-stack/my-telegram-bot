@@ -47,7 +47,7 @@ def webhook():
 
 @app.route("/")
 def index():
-    return "Bot is running perfectly!"
+    return "Advanced Bot is running perfectly!"
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -117,7 +117,21 @@ def callback_query(call):
         
         markup = telebot.types.InlineKeyboardMarkup()
         markup.add(telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
-        bot.send_message(chat_id, f"✅ **تم ضبط التصنيف بنجاح:**\n📚 المقياس: {chosen_subj}\n\n📥 **الآن أرسل الملف المطلوب (مستند، صوت، فيديو، صورة...) في المحادثة هنا، وسيتم رفعه فوراً للإدارة مع تصنيفه!**", reply_markup=markup)
+        bot.send_message(chat_id, f"✅ **تم ضبط التصنيف بنجاح:**\n📚 المقياس: {chosen_subj}\n\n📥 **الآن أرسل ملفاتك تباعاً (مستند، صوت، فيديو...) وسيتم إرسالها للإدارة بنفس التصنيف. عندما تنتهي اضغط (تم، إنهاء)!**", reply_markup=markup)
+        
+    elif data == "more_files":
+        user_states[chat_id]["step"] = "waiting_for_file"
+        subj = user_states[chat_id].get("temp_subj", "المقياس")
+        bot.send_message(chat_id, f"📥 أرسل الملف التالي لنفس المقياس ({subj}):")
+        
+    elif data == "finish_files":
+        user_states[chat_id] = {}
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(
+            telebot.types.InlineKeyboardButton("➕ مشاركة ملفات جديدة", callback_data="btn_share"),
+            telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
+        )
+        bot.send_message(chat_id, "✅ **تم إنهاء عملية رفع الملفات بنجاح. شكراً لمساهمتك العطرة!**", reply_markup=markup)
         
     elif data == "btn_get":
         markup = telebot.types.InlineKeyboardMarkup()
@@ -138,13 +152,12 @@ def callback_query(call):
     elif data.startswith("browse_"):
         subj_name = data.replace("browse_", "")
         db = load_db()
-        # عرض الملفات المقبولة فقط للمطالعة
-        matched_files = [f for f in db if f.get("subject") == subj_name and f.get("status") == "approved"]
+        matched_files = [f for f in db if f.get("subject") == subj_name and f.get("status"] == "approved"]
         
         if matched_files:
             bot.send_message(chat_id, f"📂 **إليك الملفات المتاحة لمقياس ({subj_name}):**")
             for item in matched_files:
-                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}\n👤 مشاركة: {item['sender']}"
+                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}" # بدون ذكر اسم المستخدم نهائياً
                 try:
                     if item["media_type"] == "document":
                         bot.send_document(chat_id, item["file_id"], caption=caption)
@@ -166,30 +179,43 @@ def callback_query(call):
     elif data.startswith("accept_"):
         file_id_key = data.replace("accept_", "")
         db = load_db()
-        found = False
         for item in db:
             if str(item.get("unique_key")) == file_id_key:
                 item["status"] = "approved"
-                found = True
                 try:
                     bot.send_message(item["student_chat_id"], f"🎉 **مبروك! تم قبول ونشر ملفك الخاص بمقياس ({item['subject']}) في البوت بنجاح.**")
                 except:
                     pass
                 break
-        if found:
-            save_db(db)
-            bot.answer_callback_query(call.id, "تم قبول ونشر الملف بنجاح ✅")
-            bot.edit_message_text(call.message.text + "\n\n✅ **[تم قبول هذا الملف ونشره في البوت بنجاح]**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
-        else:
-            bot.answer_callback_query(call.id, "الملف غير موجود أو تم التعامل معه مسبقاً ⚠️", show_alert=True)
-            
-    elif data.startswith("reject_"):
-        file_id_key = data.replace("reject_", "")
-        db = load_db()
-        db = [item for item in db if str(item.get("unique_key")) != file_id_key]
         save_db(db)
-        bot.answer_callback_query(call.id, "تم رفض الملف ❌")
-        bot.edit_message_text(call.message.text + "\n\n❌ **[تم رفض هذا الملف وحذفه]**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
+        bot.answer_callback_query(call.id, "تم قبول ونشر الملف بنجاح ✅")
+        bot.edit_message_text(call.message.text + "\n\n✅ **[تم قبول ونشر الملف]**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
+        
+    elif data.startswith("ask_reject_"):
+        file_id_key = data.replace("ask_reject_", "")
+        user_states[f"reject_reason_{chat_id}"] = file_id_key
+        bot.answer_callback_query(call.id, "اكتب سبب الرفض في رسالة الآن")
+        bot.send_message(chat_id, "✍️ **أرسل الآن رسالة نصية تحتوي على سبب الرفض ليتم إرسالها للطالب:**")
+        
+    elif data.startswith("chg_subj_"):
+        file_id_key = data.replace("chg_subj_", "")
+        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+        for subj in SUBJECTS:
+            markup.add(telebot.types.InlineKeyboardButton(subj, callback_data=f"set_new_subj_{file_id_key}_{subj}"))
+        bot.send_message(chat_id, "🔄 اختر المقياس الصحيح الجديد للملف:", reply_markup=markup)
+        
+    elif data.startswith("set_new_subj_"):
+        parts = data.replace("set_new_subj_", "").split("_", 1)
+        file_id_key = parts[0]
+        new_subj = parts[1]
+        db = load_db()
+        for item in db:
+            if str(item.get("unique_key")) == file_id_key:
+                item["subject"] = new_subj
+                break
+        save_db(db)
+        bot.answer_callback_query(call.id, f"تم تعديل المقياس إلى: {new_subj} ✅")
+        bot.send_message(chat_id, f"✅ **تم تحديث مقياس الملف بنجاح إلى: ({new_subj})**")
         
     elif data == "main_menu":
         user_states[chat_id] = {}
@@ -199,6 +225,29 @@ def callback_query(call):
             telebot.types.InlineKeyboardButton("📂 أود الحصول على ملفات", callback_data="btn_get")
         )
         bot.send_message(chat_id, "أهلاً بك في القائمة الرئيسية:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: f"reject_reason_{message.chat.id}" in user_states)
+def handle_reject_reason(message):
+    chat_id = message.chat.id
+    file_id_key = user_states.pop(f"reject_reason_{chat_id}")
+    reason = message.text
+    
+    db = load_db()
+    target_item = None
+    new_db = []
+    for item in db:
+        if str(item.get("unique_key")) == file_id_key:
+            target_item = item
+        else:
+            new_db.append(item)
+    save_db(new_db)
+    
+    if target_item:
+        try:
+            bot.send_message(target_item["student_chat_id"], f"❌ **عذراً، تم رفض ملفك الخاص بمقياس ({target_item['subject']}).**\n📝 **السبب:** {reason}")
+        except:
+            pass
+    bot.send_message(chat_id, "✅ **تم رفض الملف وحذف وإرسال سبب الرفض للطالب بنجاح.**")
 
 @bot.message_handler(content_types=['document', 'audio', 'voice', 'photo', 'video'])
 def handle_files(message):
@@ -214,7 +263,7 @@ def handle_files(message):
             telebot.types.InlineKeyboardButton("➕ اضغط هنا لبدء تصنيف الملف", callback_data="btn_share"),
             telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
         )
-        bot.send_message(chat_id, "⚠️ **عذراً، يرجى اختيار (أود مشاركة ملف) وتحديد التصنيف أولاً قبل إرسال الملف!**", reply_markup=markup)
+        bot.send_message(chat_id, "⚠️ **عذراً، يرجى اختيار (أود مشاركة ملف) وتحديد التصنيف أولاً!**", reply_markup=markup)
         return
         
     user = message.from_user
@@ -242,7 +291,6 @@ def handle_files(message):
         
     unique_key = str(message.message_id)
     
-    # حفظ الملف في القاعدة بحالة قيد الانتظار pending
     db = load_db()
     new_item = {
         "unique_key": unique_key,
@@ -257,6 +305,7 @@ def handle_files(message):
     db.append(new_item)
     save_db(db)
     
+    # رسالة الإدارة مع اسم المستخدم + أزرار القبول، الرفض مع سبب، وتعديل التصنيف
     caption = (
         f"📥 **طلب مشاركة جديد للمراجعة:**\n\n"
         f"📚 المقياس: {subj}\n"
@@ -265,23 +314,25 @@ def handle_files(message):
         f"👤 الطالب: {username} (ID: `{chat_id}`)"
     )
     
-    markup = telebot.types.InlineKeyboardMarkup()
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         telebot.types.InlineKeyboardButton("✅ قبول ونشر", callback_data=f"accept_{unique_key}"),
-        telebot.types.InlineKeyboardButton("❌ رفض وحذف", callback_data=f"reject_{unique_key}")
+        telebot.types.InlineKeyboardButton("❌ رفض مع سبب", callback_data=f"ask_reject_{unique_key}"),
+        telebot.types.InlineKeyboardButton("🔄 تعديل التصنيف", callback_data=f"chg_subj_{unique_key}")
     )
     
     try:
         bot.forward_message(chat_id=ADMIN_GROUP, from_chat_id=chat_id, message_id=message.message_id)
         bot.send_message(ADMIN_GROUP, caption, reply_markup=markup, parse_mode="Markdown")
         
-        bot.send_message(chat_id, f"✅ **تم إرسال الملف وتصنيفه تحت مقياس ({subj}) إلى مجموعة الإدارة بنجاح!**\nسيتم مراجعته ونشره قريباً.", reply_markup={
-            "inline_keyboard": [
-                [{"text": "➕ إرسال ملف آخر", "callback_data": "btn_share"}],
-                [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
-            ]
-        })
-        user_states[chat_id] = {}
+        # أزرار الإرسال المتعدد للطالب
+        markup_student = telebot.types.InlineKeyboardMarkup()
+        markup_student.add(
+            telebot.types.InlineKeyboardButton("➕ إضافة ملف آخر لنفس التصنيف", callback_data="more_files"),
+            telebot.types.InlineKeyboardButton("✅ تم، إنهاء", callback_data="finish_files"),
+            telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
+        )
+        bot.send_message(chat_id, f"✅ **تم استلام الملف وإرساله للإدارة تحت مقياس ({subj}).**\nهل تريد إضافة ملف آخر بنفس التصنيف أم تنتهي؟", reply_markup=markup_student)
     except Exception as e:
         print(f"Error forwarding: {e}")
         bot.send_message(chat_id, "✅ **تم إرسال الملف للمجموعة بنجاح.**")
