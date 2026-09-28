@@ -8,7 +8,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Educational Bot is active and running!")
+        self.wfile.write(b"Bot is active and running!")
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -21,9 +21,23 @@ t.start()
 
 TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
-ADMIN_GROUP = "-1004332853451"  # معرف مجموعة الإدارة الجديدة
-CREATOR_CHANNEL = "https://t.me/ESEShadows"
-ADMIN_USER_ID = 7049545419      # حسابك الخاص بصلاحيات المدير
+
+DB_FILE = "database.json"
+
+# دالة لتحميل البيانات من الملف الدائم
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+# دالة لحفظ البيانات في الملف الدائم
+def save_db(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 user_states = {}
 processed_updates = set()
@@ -54,7 +68,7 @@ FILE_TYPES = [
     "📋 مواضيع امتحانات"
 ]
 
-print("Final Direct-Forward Bot Started Successfully...")
+print("Persistent Database Bot Started Successfully...")
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
@@ -66,22 +80,6 @@ def send_message(chat_id, text, reply_markup=None):
         urllib.request.urlopen(req)
     except Exception as e:
         print(f"Error sending message: {e}")
-
-def forward_to_admin_group(chat_id, message_id, caption, reply_markup):
-    payload = {
-        "chat_id": ADMIN_GROUP,
-        "from_chat_id": chat_id,
-        "message_id": message_id,
-        "caption": caption,
-        "reply_markup": reply_markup,
-        "parse_mode": "Markdown"
-    }
-    data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(f"{URL}/forwardMessage", data=data, headers={'Content-Type': 'application/json'})
-    try:
-        urllib.request.urlopen(req)
-    except Exception as e:
-        print(f"Error forwarding to admin group: {e}")
 
 while True:
     try:
@@ -103,10 +101,9 @@ while True:
                         cq = update["callback_query"]
                         chat_id = cq["message"]["chat"]["id"]
                         data_val = cq["data"]
-                        user_id = cq["from"]["id"]
                         
                         if data_val == "btn_share":
-                            send_message(chat_id, "📥 **أرسل الآن أي ملف أو محاضرة** تريد مشاركتها، وسيحولها البوت فوراً للإدارة لتحديد تصنيفها:")
+                            send_message(chat_id, "📥 **أرسل الآن الملف (مستند، صوت، صورة...)** هنا، وسيلتقطه البوت تلقائياً:")
                         
                         elif data_val == "btn_get":
                             keyboard = {
@@ -146,111 +143,81 @@ while True:
                             
                         elif data_val.startswith("browse_"):
                             subj_name = data_val.replace("browse_", "")
-                            keyboard_back = {
-                                "inline_keyboard": [
-                                    [{"text": "📂 تصفح مقياس آخر", "callback_data": "get_s1"}],
-                                    [{"text": "🔗 قناة منشئ البوت", "url": CREATOR_CHANNEL}],
-                                    [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
-                                ]
-                            }
-                            send_message(chat_id, f"🔍 **تصفح مقياس ({subj_name}).**\n\n⚠️ الملفات المقبولة تظهر هنا مباشرة.\n\nتابعنا عبر قناة منشئ البوت:", reply_markup=keyboard_back)
+                            database_files = load_db()
+                            matched_files = [f for f in database_files if f["subject"] == subj_name]
                             
-                        elif data_val == "start_classification":
-                            year_keyboard = {
-                                "inline_keyboard": [
-                                    [{"text": "📚 السنة الأولى ليسونس", "callback_data": "cls_year_السنة الأولى"}],
-                                    [{"text": "📖 السنة الثانية ليسونس", "callback_data": "cls_year_السنة الثانية"}],
-                                    [{"text": "❌ إلغاء", "callback_data": "main_menu"}]
-                                ]
-                            }
-                            send_message(chat_id, "حدد السنة الدراسية الخاصة بالملف:", reply_markup=year_keyboard)
-
-                        elif data_val.startswith("cls_year_"):
-                            chosen_year = data_val.replace("cls_year_", "")
-                            user_states[chat_id] = user_states.get(chat_id, {})
-                            user_states[chat_id]["temp_year"] = chosen_year
+                            if matched_files:
+                                send_message(chat_id, f"📂 **إليك الملفات المتاحة لمقياس ({subj_name}):**")
+                                for file_item in matched_files:
+                                    f_type = file_item["type"]
+                                    f_id = file_item["file_id"]
+                                    caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {f_type}"
+                                    
+                                    payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"}
+                                    if file_item["media_type"] == "document":
+                                        payload["document"] = f_id
+                                        endpoint = "sendDocument"
+                                    elif file_item["media_type"] == "audio":
+                                        payload["audio"] = f_id
+                                        endpoint = "sendAudio"
+                                    elif file_item["media_type"] == "voice":
+                                        payload["voice"] = f_id
+                                        endpoint = "sendVoice"
+                                    else:
+                                        payload["photo"] = f_id
+                                        endpoint = "sendPhoto"
+                                        
+                                    req_send = urllib.request.Request(f"{URL}/{endpoint}", data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+                                    try:
+                                        urllib.request.urlopen(req_send)
+                                    except Exception as ex:
+                                        print(f"Error sending file: {ex}")
+                            else:
+                                send_message(chat_id, f"⚠️ **لا توجد ملفات مرفوعة حالياً لمقياس ({subj_name}).**", reply_markup={
+                                    "inline_keyboard": [
+                                        [{"text": "📂 تصفح مقياس آخر", "callback_data": "get_s1"}],
+                                        [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
+                                    ]
+                                })
                             
-                            keyboard = {
-                                "inline_keyboard": [
-                                    [{"text": " السداسي الأول", "callback_data": "cls_sem_الأول"}],
-                                    [{"text": " السداسي الثاني", "callback_data": "cls_sem_الثاني"}]
-                                ]
-                            }
-                            send_message(chat_id, "اختر السداسي الخاص بهذا الملف:", reply_markup=keyboard)
-                            
-                        elif data_val.startswith("cls_sem_"):
-                            chosen_sem = data_val.replace("cls_sem_", "")
-                            user_states[chat_id]["temp_sem"] = chosen_sem
-                            
-                            keyboard_types = {"inline_keyboard": []}
-                            row = []
-                            for f_type in FILE_TYPES:
-                                row.append({"text": f_type, "callback_data": f"cls_type_{f_type}"})
-                                if len(row) == 2:
-                                    keyboard_types["inline_keyboard"].append(row)
-                                    row = []
-                            if row:
-                                keyboard_types["inline_keyboard"].append(row)
-                                
-                            send_message(chat_id, "اختر نوع الملف المرسل:", reply_markup=keyboard_types)
-                            
-                        elif data_val.startswith("cls_type_"):
-                            chosen_type = data_val.replace("cls_type_", "")
+                        elif data_val.startswith("autosave_type_"):
+                            chosen_type = data_val.replace("autosave_type_", "")
                             user_states[chat_id]["temp_type"] = chosen_type
                             
                             keyboard_subjects = {"inline_keyboard": []}
                             row = []
                             for subj in SUBJECTS:
-                                row.append({"text": subj, "callback_data": f"final_subj_{subj}"})
+                                row.append({"text": subj, "callback_data": f"autosave_subj_{subj}"})
                                 if len(row) == 2:
                                     keyboard_subjects["inline_keyboard"].append(row)
                                     row = []
                             if row:
                                 keyboard_subjects["inline_keyboard"].append(row)
                                 
-                            send_message(chat_id, "اختر المقياس النهائي للملف:", reply_markup=keyboard_subjects)
+                            send_message(chat_id, "اختر المقياس لربط هذا الملف به وتخزينه:", reply_markup=keyboard_subjects)
                             
-                        elif data_val.startswith("final_subj_"):
-                            subject_name = data_val.replace("final_subj_", "")
+                        elif data_val.startswith("autosave_subj_"):
+                            subject_name = data_val.replace("autosave_subj_", "")
                             state = user_states.get(chat_id, {})
-                            username = state.get("username", "مجهول")
-                            year = state.get("temp_year", "السنة الأولى")
-                            sem = state.get("temp_sem", "الأول")
-                            f_type = state.get("temp_type", "ملف")
-                            msg_id = state.get("pending_file_id")
                             
-                            # بناء رسالة خلاصة التصنيف النهائية وإرسالها للمجموعة
-                            summary_text = (
-                                f"📋 **خلاصة تصنيف الملف:**\n\n"
-                                f"📚 المقياس: {subject_name}\n"
-                                f"🎓 السنة: {year} - السداسي {sem}\n"
-                                f"🏷️ النوع: {f_type}\n"
-                                f"👤 المرسل: {username} (ID: `{chat_id}`)"
-                            )
-                            
-                            # أزرار الإشراف للمجموعة
-                            admin_markup = {
-                                "inline_keyboard": [
-                                    [{"text": "✅ قبول ونشر للملفات", "callback_data": "admin_accept"}],
-                                    [{"text": "❌ رفض الحذف", "callback_data": "admin_reject"}]
-                                ]
-                            }
-                            
-                            if msg_id:
-                                forward_to_admin_group(chat_id, msg_id, summary_text, admin_markup)
-                            
-                            send_message(chat_id, f"✅ **تم إرسال الملف مع خلاصة التصنيف إلى مجموعة الإدارة بنجاح تحت مقياس ({subject_name})!**\nشكراً لمساهمتك معنا.", reply_markup={
+                            if "file_id" in state:
+                                db = load_db()
+                                db.append({
+                                    "subject": subject_name,
+                                    "file_id": state["file_id"],
+                                    "media_type": state["media_type"],
+                                    "type": state.get("temp_type", "ملف عام"),
+                                    "sender": state.get("username", "مجهول")
+                                })
+                                save_db(db)
+                                
+                            send_message(chat_id, f"✅ **تم تخزين الملف بنجاح في قاعدة البيانات تحت مقياس ({subject_name})!**\nأصبح متاحاً للطلاب فوراً.", reply_markup={
                                 "inline_keyboard": [
                                     [{"text": "➕ إرسال ملف آخر", "callback_data": "btn_share"}],
                                     [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
                                 ]
                             })
                             user_states[chat_id] = {}
-                            
-                        elif data_val == "admin_accept":
-                            send_message(chat_id, "✅ **تم قبول الملف ونشره في النظام.**")
-                        elif data_val == "admin_reject":
-                            send_message(chat_id, "❌ **تم رفض الملف.**")
                             
                         elif data_val == "main_menu":
                             user_states[chat_id] = {}
@@ -273,7 +240,6 @@ while True:
                             
                         text = msg.get("text", "")
                         user = msg.get("from", {})
-                        user_id = user.get("id")
                         username = f"@{user.get('username')}" if user.get("username") else user.get("first_name", "مجهول")
                         
                         if text == "/start":
@@ -284,41 +250,45 @@ while True:
                                     [{"text": "📂 أود الحصول على ملفات", "callback_data": "btn_get"}]
                                 ]
                             }
-                            send_message(chat_id, "حياك الله في بوت خدمات الطلبة 📚\nيمكنك إرسال أي ملف مباشرة في أي وقت:", reply_markup=keyboard)
+                            send_message(chat_id, "حياك الله في بوت خدمات الطلبة 📚", reply_markup=keyboard)
                             continue
                             
-                        has_media = any(k in msg for k in ["document", "photo", "audio", "voice", "video", "video_note"])
-                        if has_media:
+                        media_type = None
+                        file_id = None
+                        if "document" in msg:
+                            media_type = "document"
+                            file_id = msg["document"]["file_id"]
+                        elif "audio" in msg:
+                            media_type = "audio"
+                            file_id = msg["audio"]["file_id"]
+                        elif "voice" in msg:
+                            media_type = "voice"
+                            file_id = msg["voice"]["file_id"]
+                        elif "photo" in msg:
+                            media_type = "photo"
+                            file_id = msg["photo"][-1]["file_id"]
+                            
+                        if file_id:
                             user_states[chat_id] = {
-                                "pending_file_id": msg["message_id"],
+                                "file_id": file_id,
+                                "media_type": media_type,
                                 "username": username
                             }
                             
-                            # ميزة خاصة للمشرف (حسابك الأساسي): رفع مباشر بدون خطوات مطولة إذا أردت
-                            if user_id == ADMIN_USER_ID:
-                                direct_markup = {
-                                    "inline_keyboard": [
-                                        [{"text": "⚡ نشر مباشر (خاص بالمدير)", "callback_data": "final_subj_أصول الفقه"}]
-                                    ]
-                                }
-                                send_message(chat_id, "👑 **أهلاً بك يا مدير النظام (`@IN77Shadows`).**\nتم استلام ملفك، هل تريد نشره مباشرة أم تحديد معلوماته بشكل تفصيلي؟", reply_markup={
-                                    "inline_keyboard": [
-                                        [{"text": "✅ تحديد معلومات وتصنيف الملف", "callback_data": "start_classification"}],
-                                        [{"text": "⚡ نشر مباشر فوري", "callback_data": "final_subj_علوم القرآن"}]
-                                    ]
-                                })
-                            else:
-                                # للطلاب العاديين
-                                choice_keyboard = {
-                                    "inline_keyboard": [
-                                        [{"text": "✅ تحديد معلومات وتصنيف الملف", "callback_data": "start_classification"}],
-                                        [{"text": "➕ إرسال ملف آخر / إلغاء", "callback_data": "btn_share"}]
-                                    ]
-                                }
-                                send_message(chat_id, "📥 **تم استلام ملفك بنجاح!**\nالرجاء تحديد معلوماته ليتم إرساله مع الخلاصة لمجموعة الإدارة:", reply_markup=choice_keyboard)
+                            keyboard_types = {"inline_keyboard": []}
+                            row = []
+                            for f_type in FILE_TYPES:
+                                row.append({"text": f_type, "callback_data": f"autosave_type_{f_type}"})
+                                if len(row) == 2:
+                                    keyboard_types["inline_keyboard"].append(row)
+                                    row = []
+                            if row:
+                                keyboard_types["inline_keyboard"].append(row)
+                                
+                            send_message(chat_id, "📥 **تم التقاط الملف بنجاح!**\nاختر نوع الملف:", reply_markup=keyboard_types)
                         else:
                             if text:
-                                send_message(chat_id, "أهلاً بك. يمكنك إرسال ملفاتك مباشرة أو الاختيار من القائمة:", reply_markup={
+                                send_message(chat_id, "أهلاً بك. اختر ما تحتاجه من القائمة:", reply_markup={
                                     "inline_keyboard": [
                                         [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
                                     ]
