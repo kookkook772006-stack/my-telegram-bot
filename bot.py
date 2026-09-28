@@ -152,12 +152,12 @@ def callback_query(call):
     elif data.startswith("browse_"):
         subj_name = data.replace("browse_", "")
         db = load_db()
-        matched_files = [f for f in db if f.get("subject") == subj_name and f.get("status"] == "approved"]
+        matched_files = [f for f in db if f.get("subject") == subj_name and f.get("status") == "approved"]
         
         if matched_files:
             bot.send_message(chat_id, f"📂 **إليك الملفات المتاحة لمقياس ({subj_name}):**")
             for item in matched_files:
-                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}" # بدون ذكر اسم المستخدم نهائياً
+                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}"
                 try:
                     if item["media_type"] == "document":
                         bot.send_document(chat_id, item["file_id"], caption=caption)
@@ -247,7 +247,7 @@ def handle_reject_reason(message):
             bot.send_message(target_item["student_chat_id"], f"❌ **عذراً، تم رفض ملفك الخاص بمقياس ({target_item['subject']}).**\n📝 **السبب:** {reason}")
         except:
             pass
-    bot.send_message(chat_id, "✅ **تم رفض الملف وحذف وإرسال سبب الرفض للطالب بنجاح.**")
+    bot.send_message(chat_id, "✅ **تم رفض الملف وحذفه وإرسال سبب الرفض للطالب بنجاح.**")
 
 @bot.message_handler(content_types=['document', 'audio', 'voice', 'photo', 'video'])
 def handle_files(message):
@@ -305,7 +305,6 @@ def handle_files(message):
     db.append(new_item)
     save_db(db)
     
-    # رسالة الإدارة مع اسم المستخدم + أزرار القبول، الرفض مع سبب، وتعديل التصنيف
     caption = (
         f"📥 **طلب مشاركة جديد للمراجعة:**\n\n"
         f"📚 المقياس: {subj}\n"
@@ -325,7 +324,6 @@ def handle_files(message):
         bot.forward_message(chat_id=ADMIN_GROUP, from_chat_id=chat_id, message_id=message.message_id)
         bot.send_message(ADMIN_GROUP, caption, reply_markup=markup, parse_mode="Markdown")
         
-        # أزرار الإرسال المتعدد للطالب
         markup_student = telebot.types.InlineKeyboardMarkup()
         markup_student.add(
             telebot.types.InlineKeyboardButton("➕ إضافة ملف آخر لنفس التصنيف", callback_data="more_files"),
