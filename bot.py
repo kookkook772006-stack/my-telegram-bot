@@ -3,26 +3,11 @@ import json
 from flask import Flask, request
 import telebot
 
-TOKEN = os.environ.get("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_GROUP = "-1004332853451"  # معرف مجموعة الإدارة الخاصة بك
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
 app = Flask(__name__)
-
-DB_FILE = "database.json"
-
-# دوال إدارة قاعدة البيانات المحلية الدائمة
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
 
 SUBJECTS = [
     "علوم القرآن", "مدخل لأصول الفقه", "العقيدة الإسلامية",
@@ -38,7 +23,6 @@ FILE_TYPES = [
 
 user_states = {}
 
-# نقطة استقبال التحديثات من تيليجرام (Webhook)
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     json_str = request.get_data().decode("UTF-8")
@@ -48,54 +32,61 @@ def webhook():
 
 @app.route("/")
 def index():
-    return "Webhook Bot is running smoothly!"
+    return "Forwarding Bot to Admin Group is running smoothly!"
 
 # 1. أمر البداية
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
+    if message.chat.type != "private":
+        return
     user_states[chat_id] = {}
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(
         telebot.types.InlineKeyboardButton("➕ أود مشاركة ملف", callback_data="btn_share"),
         telebot.types.InlineKeyboardButton("📂 أود الحصول على ملفات", callback_data="btn_get")
     )
-    bot.send_message(chat_id, "حياك الله في بوت خدمات الطلبة 📚\nاختر ما تحتاجه:", reply_markup=markup)
+    bot.send_message(chat_id, "حياك الله في بوت خدمات الطلبة 📚\nيمكنك إرسال أي ملف لمشاركته مع الإدارة:", reply_markup=markup)
 
-# 2. استقبال الملفات التقاطاً فورياً
-@bot.message_handler(content_types=['document', 'audio', 'voice', 'photo'])
+# 2. استقبال الملفات وتحويلها فوراً للمجموعة
+@bot.message_handler(content_types=['document', 'audio', 'voice', 'photo', 'video'])
 def handle_files(message):
     chat_id = message.chat.id
     if message.chat.type != "private":
         return
         
-    media_type = None
-    file_id = None
-    if message.document:
-        media_type = "document"
-        file_id = message.document.file_id
-    elif message.audio:
-        media_type = "audio"
-        file_id = message.audio.file_id
-    elif message.voice:
-        media_type = "voice"
-        file_id = message.voice.file_id
-    elif message.photo:
-        media_type = "photo"
-        file_id = message.photo[-1].file_id
+    user = message.from_user
+    username = f"@{user.username}" if user.username else user.first_name
+    
+    # تحويل الملف رسيماً إلى مجموعة الإدارة مع أزرار الإشراف
+    caption = (
+        f"📥 **ملف جديد مُرسل للمراجعة:**\n"
+        f"👤 الطالب: {username} (ID: `{chat_id}`)\n"
+        f"📎 تم استلام الملف وبانتظار مراجعته ونشره."
+    )
+    
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(
+        telebot.types.InlineKeyboardButton("✅ قبول ونشر", callback_data=f"admin_accept_{chat_id}"),
+        telebot.types.InlineKeyboardButton("❌ رفض وحذف", callback_data="admin_reject")
+    )
+    
+    try:
+        # إعادة توجيه الرسالة لمجموعة الإدارة
+        bot.forward_message(chat_id=ADMIN_GROUP, from_chat_id=chat_id, message_id=message.message_id)
+        # إرسال أزرار الإشراف تحت الرسالة في المجموعة
+        bot.send_message(ADMIN_GROUP, caption, reply_markup=markup, parse_mode="Markdown")
         
-    if file_id:
-        user_states[chat_id] = {
-            "file_id": file_id,
-            "media_type": media_type,
-            "username": message.from_user.first_name
-        }
-        
-        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-        for f_type in FILE_TYPES:
-            markup.add(telebot.types.InlineKeyboardButton(f_type, callback_data=f"autosave_type_{f_type}"))
-            
-        bot.send_message(chat_id, "📥 **تم التقاط الملف بنجاح!**\nما هو نوع هذا الملف؟", reply_markup=markup)
+        # إشعار الطالب بأن ملفه وصل للإدارة
+        bot.send_message(chat_id, "✅ **تم استلام ملفك وتحويله إلى مجموعة الإدارة بنجاح!**\nسيتم مراجعته ونشره قريباً.", reply_markup={
+            "inline_keyboard": [
+                [{"text": "➕ إرسال ملف آخر", "callback_data": "btn_share"}],
+                [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
+            ]
+        })
+    except Exception as e:
+        print(f"Error forwarding message: {e}")
+        bot.send_message(chat_id, "❌ حدث خطأ أثناء إرسال الملف للإدارة. يجيب التأكد من أن البوت مشرف في مجموعة الإدارة.")
 
 # 3. معالجة الأزرار التفاعلية
 @bot.callback_query_handler(func=lambda call: True)
@@ -104,7 +95,7 @@ def callback_query(call):
     data = call.data
     
     if data == "btn_share":
-        bot.send_message(chat_id, "📥 **أرسل الآن الملف** في المحادثة هنا، وسيلتقطه البوت تلقائياً لربطه بالقسم.")
+        bot.send_message(chat_id, "📥 **أرسل الآن الملف** في المحادثة هنا، وسيقوم البوت بتحويله للمجموعة تلقائياً:")
         
     elif data == "btn_get":
         markup = telebot.types.InlineKeyboardMarkup()
@@ -113,70 +104,26 @@ def callback_query(call):
             telebot.types.InlineKeyboardButton("📖 السنة الثانية ليسونس", callback_data="get_s2"),
             telebot.types.InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")
         )
-        bot.send_message(chat_id, "اختر السنة الدراسية للتصفح:", reply_markup=markup)
+        bot.send_message(chat_id, "اختر السنة الدراسية للتصفح من القناة الرسمية:", reply_markup=markup)
         
     elif data in ["get_s1", "get_s2"]:
         markup = telebot.types.InlineKeyboardMarkup(row_width=2)
         for subj in SUBJECTS:
             markup.add(telebot.types.InlineKeyboardButton(f"📁 {subj}", callback_data=f"browse_{subj}"))
         markup.add(telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
-        bot.send_message(chat_id, "اختر المقياس لعرض ملفاته:", reply_markup=markup)
+        bot.send_message(chat_id, "اختر المقياس:", reply_markup=markup)
         
     elif data.startswith("browse_"):
         subj_name = data.replace("browse_", "")
-        db = load_db()
-        matched_files = [f for f in db if f["subject"] == subj_name]
+        bot.send_message(chat_id, f"📂 يتم الآن مراجعة ملفات مقياس ({subj_name}) ونشرها في القناة المخصصة.")
         
-        if matched_files:
-            bot.send_message(chat_id, f"📂 **إليك الملفات المتاحة لمقياس ({subj_name}):**")
-            for item in matched_files:
-                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}"
-                if item["media_type"] == "document":
-                    bot.send_document(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "audio":
-                    bot.send_audio(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "voice":
-                    bot.send_voice(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "photo":
-                    bot.send_photo(chat_id, item["file_id"], caption=caption)
-        else:
-            markup = telebot.types.InlineKeyboardMarkup()
-            markup.add(telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
-            bot.send_message(chat_id, f"⚠️ **لا توجد ملفات مرفوعة حالياً لمقياس ({subj_name}).**", reply_markup=markup)
-            
-    elif data.startswith("autosave_type_"):
-        chosen_type = data.replace("autosave_type_", "")
-        if chat_id not in user_states:
-            user_states[chat_id] = {}
-        user_states[chat_id]["temp_type"] = chosen_type
+    elif data.startswith("admin_accept_"):
+        bot.answer_callback_query(call.id, "تم قبول ونشر الملف بنجاح ✅")
+        bot.send_message(chat_id, "✅ **تم قبول هذا الملف ونشره.**")
         
-        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-        for subj in SUBJECTS:
-            markup.add(telebot.types.InlineKeyboardButton(subj, callback_data=f"autosave_subj_{subj}"))
-        bot.send_message(chat_id, "اختر المقياس أو القسم لربط هذا الملف به:", reply_markup=markup)
-        
-    elif data.startswith("autosave_subj_"):
-        subject_name = data.replace("autosave_subj_", "")
-        state = user_states.get(chat_id, {})
-        
-        if "file_id" in state:
-            db = load_db()
-            db.append({
-                "subject": subject_name,
-                "file_id": state["file_id"],
-                "media_type": state["media_type"],
-                "type": state.get("temp_type", "ملف عام"),
-                "sender": state.get("username", "مجهول")
-            })
-            save_db(db)
-            
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(
-            telebot.types.InlineKeyboardButton("➕ إرسال ملف آخر", callback_data="btn_share"),
-            telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu")
-        )
-        bot.send_message(chat_id, f"✅ **تم تخزين الملف بنجاح تحت مقياس ({subject_name})!**\nأصبح متاحاً للطلاب فوراً.", reply_markup=markup)
-        user_states[chat_id] = {}
+    elif data == "admin_reject":
+        bot.answer_callback_query(call.id, "تم رفض الملف ❌")
+        bot.send_message(chat_id, "❌ **تم رفض وحذف هذا الملف.**")
         
     elif data == "main_menu":
         user_states[chat_id] = {}
@@ -188,8 +135,7 @@ def callback_query(call):
         bot.send_message(chat_id, "أهلاً بك في القائمة الرئيسية:", reply_markup=markup)
 
 if __name__ == "__main__":
-    # ضبط الـ Webhook تلقائياً عند تشغيل السيرفر
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL") # رابط استضافتك على رندر مثلاً
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
     if RENDER_URL:
         bot.remove_webhook()
         bot.set_webhook(url=f"{RENDER_URL}/{TOKEN}")
