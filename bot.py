@@ -1,15 +1,15 @@
 import os
-import time
 import json
-import urllib.request
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
+# إعداد سيرفر وهمي ليبقي البوت مستيقظاً على Render
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is alive and running!")
+        self.wfile.write(b"Educational Bot is alive and running!")
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -22,15 +22,17 @@ t.start()
 
 TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
-CHANNEL_ID = "@m388393"
+CHANNEL_ID = "@m388393"  # قناة النشر العامة
 
-processed_updates = set()
-last_update_id = 0
+# ذاكرة مؤقتة لتتبع حالات المستخدمين (ماذا يفعل الطالب الآن؟)
+user_states = {}
+# تخزين الملفات المبسط (يمكن استبداله لاحقاً بقاعدة بيانات حقيقية)
+database_files = []
 
-print("Student Bot with Sender Info started...")
-
-def send_message(chat_id, text):
+def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(f"{URL}/sendMessage", data=data, headers={'Content-Type': 'application/json'})
     try:
@@ -38,10 +40,7 @@ def send_message(chat_id, text):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def copy_message_with_sender(chat_id, message_id, sender_info):
-    # استخدام copyMessage يتيح لنا إضافة كابشن يوضح اسم المرسل بدقة فوق الملف أو الصورة
-    caption = f"📄 مشاركة جديدة:\n👤 المرسل: {sender_info}"
-    
+def copy_message(chat_id, message_id, caption):
     payload = {
         "chat_id": CHANNEL_ID,
         "from_chat_id": chat_id,
@@ -55,6 +54,9 @@ def copy_message_with_sender(chat_id, message_id, sender_info):
     except Exception as e:
         print(f"Error copying message: {e}")
 
+last_update_id = 0
+print("Advanced Educational Bot started...")
+
 while True:
     try:
         req = urllib.request.Request(f"{URL}/getUpdates?offset={last_update_id + 1}&timeout=30")
@@ -65,13 +67,39 @@ while True:
                     update_id = update["update_id"]
                     last_update_id = update_id
                     
-                    if update_id in processed_updates:
+                    # 1. التعامل مع ضغط الأزرار (Inline Keyboards)
+                    if "callback_query" in update:
+                        cq = update["callback_query"]
+                        chat_id = cq["message"]["chat"]["id"]
+                        data_val = cq["data"]
+                        
+                        if data_val == "btn_share":
+                            user_states[chat_id] = {"step": "waiting_file"}
+                            send_message(chat_id, "📥 أرسل الآن الملف، الصورة، أو التسجيل الذي تريد مشاركته:")
+                        
+                        elif data_val == "btn_get":
+                            # عرض السنوات الدراسية للتصفح
+                            keyboard = {
+                                "inline_keyboard": [
+                                    [{"text": "📚 السنة الأولى ليسونس", "callback_data": "year_1"}],
+                                    [{"text": "📖 السنة الثانية ليسونس", "callback_data": "year_2"}],
+                                    [{"text": "🔙 القائمة الرئيسية", "callback_data": "main_menu"}]
+                                ]
+                            }
+                            send_message(chat_id, "اختر السنة الدراسية التي تبحث عنها:", reply_markup=keyboard)
+                            
+                        elif data_val == "main_menu":
+                            keyboard = {
+                                "inline_keyboard": [
+                                    [{"text": "➕ أود مشاركة ملف", "callback_data": "btn_share"}],
+                                    [{"text": "📂 أود الحصول على ملفات", "callback_data": "btn_get"}]
+                                ]
+                            }
+                            send_message(chat_id, "أهلاً بك في القائمة الرئيسية. ماذا تفضل أن تفعل؟", reply_markup=keyboard)
+                            
                         continue
-                    processed_updates.add(update_id)
-                    
-                    if len(processed_updates) > 500:
-                        processed_updates.clear()
-                    
+
+                    # 2. التعامل مع الرسائل النصية والملفات المرسلة
                     if "message" in update:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
@@ -80,29 +108,52 @@ while True:
                             continue
                             
                         text = msg.get("text", "")
+                        user = msg.get("from", {})
+                        username = f"@{user.get('username')}" if user.get("username") else user.get("first_name", "مجهول")
                         
                         if text == "/start":
-                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\n\nأرسل أي ملف، صوت، صورة، أو نص، وسأقوم بنقله إلى القناة مع حفظ اسمك:")
+                            user_states[chat_id] = {"step": "menu"}
+                            keyboard = {
+                                "inline_keyboard": [
+                                    [{"text": "➕ أود مشاركة ملف", "callback_data": "btn_share"}],
+                                    [{"text": "📂 أود الحصول على ملفات", "callback_data": "btn_get"}]
+                                ]
+                            }
+                            send_message(chat_id, "حياك الله في بوت الخدمات الطلابية 📚\nاختر ما تحتاجه:", reply_markup=keyboard)
                             continue
-                        
-                        # استخراج معلومات المرسل (الاسم أو المعرف)
-                        user = msg.get("from", {})
-                        first_name = user.get("first_name", "")
-                        username = user.get("username", "")
-                        
-                        if username:
-                            sender_info = f"@{username}"
-                        elif first_name:
-                            sender_info = f"{first_name} (بدون معرف)"
-                        else:
-                            sender_info = "مجهول"
-                        
-                        # إعادة نشر الرسالة مع إرفاق اسم المرسل في القناة
-                        copy_message_with_sender(chat_id, msg["message_id"], sender_info)
-                        
-                        # رد تأكيد للمرسل في الخاص
-                        send_message(chat_id, "✅ جزاك الله خيراً! تم إرسال مشاركتك إلى القناة مع اسمك بنجاح.")
                             
+                        current_step = user_states.get(chat_id, {}).get("step", "menu")
+                        
+                        # إذا كان في وضع الاستقبال للمشاركة
+                        if current_step == "waiting_file":
+                            has_media = any(k in msg for k in ["document", "photo", "audio", "voice", "video"])
+                            if has_media:
+                                # حفظ مؤقت لبيانات الرسالة ليتم توثيقها
+                                user_states[chat_id]["file_msg_id"] = msg["message_id"]
+                                user_states[chat_id]["step"] = "waiting_subject"
+                                send_message(chat_id, "ممتاز! 📄\nالآن اكتب اسم المقياس أو المادة الخاصة بهذا الملف (مثلاً: قانون إداري، تسيير...):")
+                            else:
+                                send_message(chat_id, "⚠️ الرجاء إرسال ملف، صورة أو مستند صالح للمشاركة.")
+                            continue
+                            
+                        elif current_step == "waiting_subject":
+                            subject_name = text
+                            file_msg_id = user_states[chat_id].get("file_msg_id")
+                            
+                            # إعادة توجيه الملف للقناة مع حفظ اسم المرسل والمقياس
+                            caption = f"📚 مقياس: {subject_name}\n👤 المرسل: {username}"
+                            copy_message(chat_id, file_msg_id, caption)
+                            
+                            user_states[chat_id]["step"] = "menu"
+                            keyboard = {
+                                "inline_keyboard": [
+                                    [{"text": "🔄 مشاركة ملف آخر", "callback_data": "btn_share"}],
+                                    [{"text": "📂 تصفح الملفات", "callback_data": "btn_get"}]
+                                ]
+                            }
+                            send_message(chat_id, "✅ جزاك الله خيراً! تم حفظ الملف وتصنيفه ونشره بنجاح في القناة.", reply_markup=keyboard)
+                            continue
+
     except Exception as e:
         print(f"Error: {e}")
         time.sleep(3)
