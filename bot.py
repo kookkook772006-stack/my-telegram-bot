@@ -23,6 +23,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
 ADMIN_GROUP = "-1004332853451"  # معرف مجموعة الإدارة الجديدة
 CREATOR_CHANNEL = "https://t.me/ESEShadows"
+ADMIN_USER_ID = 7049545419      # حسابك الخاص بصلاحيات المدير
 
 user_states = {}
 processed_updates = set()
@@ -53,14 +54,12 @@ FILE_TYPES = [
     "📋 مواضيع امتحانات"
 ]
 
-print("Group Admin Bot Started Successfully...")
+print("Final Direct-Forward Bot Started Successfully...")
 
-def send_message(chat_id, text, reply_markup=None, message_thread_id=None):
+def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    if message_thread_id:
-        payload["message_thread_id"] = message_thread_id
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(f"{URL}/sendMessage", data=data, headers={'Content-Type': 'application/json'})
     try:
@@ -100,15 +99,14 @@ while True:
                     if len(processed_updates) > 500:
                         processed_updates.clear()
                     
-                    # معالجة أزرار البوت والمجموعة
                     if "callback_query" in update:
                         cq = update["callback_query"]
                         chat_id = cq["message"]["chat"]["id"]
                         data_val = cq["data"]
-                        msg_id = cq["message"]["message_id"]
+                        user_id = cq["from"]["id"]
                         
                         if data_val == "btn_share":
-                            send_message(chat_id, "📥 **أرسل الآن أي ملف أو محاضرة** تريد مشاركتها، وسيقوم البوت بتحويلها لمجموعة الإدارة فوراً:")
+                            send_message(chat_id, "📥 **أرسل الآن أي ملف أو محاضرة** تريد مشاركتها، وسيحولها البوت فوراً للإدارة لتحديد تصنيفها:")
                         
                         elif data_val == "btn_get":
                             keyboard = {
@@ -219,8 +217,29 @@ while True:
                             year = state.get("temp_year", "السنة الأولى")
                             sem = state.get("temp_sem", "الأول")
                             f_type = state.get("temp_type", "ملف")
+                            msg_id = state.get("pending_file_id")
                             
-                            send_message(chat_id, f"✅ **تم تسجيل معلومات الملف بنجاح تحت مقياس ({subject_name})!**\nشكراً لمساهمتك معنا.", reply_markup={
+                            # بناء رسالة خلاصة التصنيف النهائية وإرسالها للمجموعة
+                            summary_text = (
+                                f"📋 **خلاصة تصنيف الملف:**\n\n"
+                                f"📚 المقياس: {subject_name}\n"
+                                f"🎓 السنة: {year} - السداسي {sem}\n"
+                                f"🏷️ النوع: {f_type}\n"
+                                f"👤 المرسل: {username} (ID: `{chat_id}`)"
+                            )
+                            
+                            # أزرار الإشراف للمجموعة
+                            admin_markup = {
+                                "inline_keyboard": [
+                                    [{"text": "✅ قبول ونشر للملفات", "callback_data": "admin_accept"}],
+                                    [{"text": "❌ رفض الحذف", "callback_data": "admin_reject"}]
+                                ]
+                            }
+                            
+                            if msg_id:
+                                forward_to_admin_group(chat_id, msg_id, summary_text, admin_markup)
+                            
+                            send_message(chat_id, f"✅ **تم إرسال الملف مع خلاصة التصنيف إلى مجموعة الإدارة بنجاح تحت مقياس ({subject_name})!**\nشكراً لمساهمتك معنا.", reply_markup={
                                 "inline_keyboard": [
                                     [{"text": "➕ إرسال ملف آخر", "callback_data": "btn_share"}],
                                     [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
@@ -228,11 +247,10 @@ while True:
                             })
                             user_states[chat_id] = {}
                             
-                        # أزرار الإشراف داخل مجموعة الإدارة
                         elif data_val == "admin_accept":
-                            send_message(chat_id, "✅ **تم قبول الملف ونشره بنجاح في البوت.**", reply_markup=None)
+                            send_message(chat_id, "✅ **تم قبول الملف ونشره في النظام.**")
                         elif data_val == "admin_reject":
-                            send_message(chat_id, "❌ **تم رفض وحذف الملف.**", reply_markup=None)
+                            send_message(chat_id, "❌ **تم رفض الملف.**")
                             
                         elif data_val == "main_menu":
                             user_states[chat_id] = {}
@@ -246,7 +264,6 @@ while True:
                             
                         continue
 
-                    # استقبال الرسائل والملفات من الطلاب
                     if "message" in update:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
@@ -256,6 +273,7 @@ while True:
                             
                         text = msg.get("text", "")
                         user = msg.get("from", {})
+                        user_id = user.get("id")
                         username = f"@{user.get('username')}" if user.get("username") else user.get("first_name", "مجهول")
                         
                         if text == "/start":
@@ -271,28 +289,33 @@ while True:
                             
                         has_media = any(k in msg for k in ["document", "photo", "audio", "voice", "video", "video_note"])
                         if has_media:
-                            # تحويل الملف فوراً لمجموعة الإدارة مع أزرار القبول والرفض
-                            caption = f"📥 **ملف جديد مُرسل للمراجعة:**\n👤 الطالب: {username} (ID: `{chat_id}`)"
-                            admin_markup = {
-                                "inline_keyboard": [
-                                    [{"text": "✅ قبول ونشر", "callback_data": "admin_accept"}],
-                                    [{"text": "❌ رفض وحذف", "callback_data": "admin_reject"}]
-                                ]
-                            }
-                            forward_to_admin_group(chat_id, msg["message_id"], caption, admin_markup)
-                            
                             user_states[chat_id] = {
                                 "pending_file_id": msg["message_id"],
                                 "username": username
                             }
                             
-                            choice_keyboard = {
-                                "inline_keyboard": [
-                                    [{"text": "✅ تم إرسال الملف، تحديد معلوماته", "callback_data": "start_classification"}],
-                                    [{"text": "➕ إرسال ملف آخر / إلغاء", "callback_data": "btn_share"}]
-                                ]
-                            }
-                            send_message(chat_id, "📥 **تم استلام ملفك وتحويله لمجموعة الإدارة فوراً!**\nهل تريد تحديد معلوماته أم إرسال ملف آخر؟", reply_markup=choice_keyboard)
+                            # ميزة خاصة للمشرف (حسابك الأساسي): رفع مباشر بدون خطوات مطولة إذا أردت
+                            if user_id == ADMIN_USER_ID:
+                                direct_markup = {
+                                    "inline_keyboard": [
+                                        [{"text": "⚡ نشر مباشر (خاص بالمدير)", "callback_data": "final_subj_أصول الفقه"}]
+                                    ]
+                                }
+                                send_message(chat_id, "👑 **أهلاً بك يا مدير النظام (`@IN77Shadows`).**\nتم استلام ملفك، هل تريد نشره مباشرة أم تحديد معلوماته بشكل تفصيلي؟", reply_markup={
+                                    "inline_keyboard": [
+                                        [{"text": "✅ تحديد معلومات وتصنيف الملف", "callback_data": "start_classification"}],
+                                        [{"text": "⚡ نشر مباشر فوري", "callback_data": "final_subj_علوم القرآن"}]
+                                    ]
+                                })
+                            else:
+                                # للطلاب العاديين
+                                choice_keyboard = {
+                                    "inline_keyboard": [
+                                        [{"text": "✅ تحديد معلومات وتصنيف الملف", "callback_data": "start_classification"}],
+                                        [{"text": "➕ إرسال ملف آخر / إلغاء", "callback_data": "btn_share"}]
+                                    ]
+                                }
+                                send_message(chat_id, "📥 **تم استلام ملفك بنجاح!**\nالرجاء تحديد معلوماته ليتم إرساله مع الخلاصة لمجموعة الإدارة:", reply_markup=choice_keyboard)
                         else:
                             if text:
                                 send_message(chat_id, "أهلاً بك. يمكنك إرسال ملفاتك مباشرة أو الاختيار من القائمة:", reply_markup={
