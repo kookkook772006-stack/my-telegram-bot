@@ -4,7 +4,6 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# سيرفر وهمي لإبقاء البوت مستيقظاً على Render
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -22,8 +21,8 @@ t.start()
 
 TOKEN = os.getenv("BOT_TOKEN")
 URL = f"https://api.telegram.org/bot{TOKEN}"
-ADMIN_CHANNEL = "@m388393"  # قناة المشرفين والإدارة
-CREATOR_CHANNEL = "https://t.me/ESEShadows" # قناة منشئ البوت
+ADMIN_CHANNEL = "-1004448279953"  # المعرف الرقمي الصحيح للقناة بصيغة تيليجرام
+CREATOR_CHANNEL = "https://t.me/ESEShadows"
 
 user_states = {}
 processed_updates = set()
@@ -54,7 +53,7 @@ FILE_TYPES = [
     "📋 مواضيع امتحانات"
 ]
 
-print("Fixed Student Bot Started Successfully...")
+print("Final Fixed Student Bot Started Successfully...")
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
@@ -67,13 +66,12 @@ def send_message(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def forward_to_admin(chat_id, message_id, caption, reply_markup):
+def forward_to_admin(chat_id, message_id, caption):
     payload = {
         "chat_id": ADMIN_CHANNEL,
         "from_chat_id": chat_id,
         "message_id": message_id,
         "caption": caption,
-        "reply_markup": reply_markup,
         "parse_mode": "Markdown"
     }
     data = json.dumps(payload).encode('utf-8')
@@ -99,14 +97,13 @@ while True:
                     if len(processed_updates) > 500:
                         processed_updates.clear()
                     
-                    # 1. معالجة الأزرار (Callback Queries)
                     if "callback_query" in update:
                         cq = update["callback_query"]
                         chat_id = cq["message"]["chat"]["id"]
                         data_val = cq["data"]
                         
                         if data_val == "btn_share":
-                            send_message(chat_id, "📥 **أرسل الآن أي ملف أو محاضرة** تريد مشاركتها، وسيستقبلها البوت فوراً:")
+                            send_message(chat_id, "📥 **أرسل الآن أي ملف أو محاضرة** تريد مشاركتها، وسيقوم البوت باستقباله فوراً وتحويله للإدارة:")
                         
                         elif data_val == "btn_get":
                             keyboard = {
@@ -155,7 +152,6 @@ while True:
                             }
                             send_message(chat_id, f"🔍 **تصفح مقياس ({subj_name}).**\n\n⚠️ إن لم تجد ملفات مرفوعة حالياً، سيتم مشاركة ملفات أخرى قريباً. يمكنك المساهمة أنت في البوت بما لديك ليجدها الطلاب الآخرون!\n\nتابعنا عبر قناة منشئ البوت:", reply_markup=keyboard_back)
                             
-                        # بدء تصنيف الملف بعد تأكيد المستخدم
                         elif data_val == "start_classification":
                             year_keyboard = {
                                 "inline_keyboard": [
@@ -183,7 +179,6 @@ while True:
                             chosen_sem = data_val.replace("cls_sem_", "")
                             user_states[chat_id]["temp_sem"] = chosen_sem
                             
-                            # اختيار نوع الملف (محاضرة، ملخص، إلخ..) بعد السداسي مباشرة
                             keyboard_types = {"inline_keyboard": []}
                             row = []
                             for f_type in FILE_TYPES:
@@ -200,7 +195,6 @@ while True:
                             chosen_type = data_val.replace("cls_type_", "")
                             user_states[chat_id]["temp_type"] = chosen_type
                             
-                            # اختيار المقياس النهائي
                             keyboard_subjects = {"inline_keyboard": []}
                             row = []
                             for subj in SUBJECTS:
@@ -216,41 +210,18 @@ while True:
                         elif data_val.startswith("final_subj_"):
                             subject_name = data_val.replace("final_subj_", "")
                             state = user_states.get(chat_id, {})
-                            file_id = state.get("pending_file_id")
                             username = state.get("username", "مجهول")
                             year = state.get("temp_year", "السنة الأولى")
                             sem = state.get("temp_sem", "الأول")
                             f_type = state.get("temp_type", "ملف")
                             
-                            if file_id:
-                                caption = (
-                                    f"📥 **مشاركة جديدة بانتظار المراجعة:**\n\n"
-                                    f"📚 المقياس: {subject_name}\n"
-                                    f"🎓 السنة: {year} - السداسي {sem}\n"
-                                    f"🏷️ النوع: {f_type}\n"
-                                    f"👤 المرسل: {username}"
-                                )
-                                admin_markup = {
-                                    "inline_keyboard": [
-                                        [{"text": "✅ قبول ونشر", "callback_data": "admin_accept"}],
-                                        [{"text": "❌ رفض وحذف", "callback_data": "admin_reject"}]
-                                    ]
-                                }
-                                forward_to_admin(chat_id, file_id, caption, admin_markup)
-                            
-                            user_states[chat_id] = {}
-                            keyboard = {
+                            send_message(chat_id, f"✅ **تم تسجيل تصنيف الملف بنجاح تحت مقياس ({subject_name})!**\n\n🔗 قناة منشئ البوت: {CREATOR_CHANNEL}", reply_markup={
                                 "inline_keyboard": [
                                     [{"text": "➕ إرسال ملف آخر", "callback_data": "btn_share"}],
                                     [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
                                 ]
-                            }
-                            send_message(chat_id, f"✅ **تم إرسال الملف إلى الإدارة بنجاح!**\nشكراً لمساهمتك معنا.\n\n🔗 تواصل مع قناة منشئ البوت: {CREATOR_CHANNEL}", reply_markup=keyboard)
-                            
-                        elif data_val == "admin_accept":
-                            send_message(chat_id, "✅ تم قبول ونشر الملف بنجاح.")
-                        elif data_val == "admin_reject":
-                            send_message(chat_id, "❌ تم رفض وحذف الملف.")
+                            })
+                            user_states[chat_id] = {}
                             
                         elif data_val == "main_menu":
                             user_states[chat_id] = {}
@@ -264,7 +235,6 @@ while True:
                             
                         continue
 
-                    # 2. استقبال أي ملف يرسله الطالب
                     if "message" in update:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
@@ -289,22 +259,25 @@ while True:
                             
                         has_media = any(k in msg for k in ["document", "photo", "audio", "voice", "video", "video_note"])
                         if has_media:
+                            # 1. إرسال الملف فوراً لقناة الإدارة بالمعرف الرقمي الجديد
+                            caption = f"📥 **ملف جديد مُرسل من الطالب:**\n👤 المستخدم: {username} (ID: `{chat_id}`)"
+                            forward_to_admin(chat_id, msg["message_id"], caption)
+                            
                             user_states[chat_id] = {
                                 "pending_file_id": msg["message_id"],
                                 "username": username
                             }
                             
-                            # زرّان عند استلام الملف لمنع الأخطاء
                             choice_keyboard = {
                                 "inline_keyboard": [
                                     [{"text": "✅ تم إرسال الملف، تحديد معلوماته", "callback_data": "start_classification"}],
                                     [{"text": "➕ إرسال ملف آخر / إلغاء", "callback_data": "btn_share"}]
                                 ]
                             }
-                            send_message(chat_id, "📥 **تم استلام ملفك بنجاح!**\nهل تريد المتابعة وتحديد معلوماته أم إرسال ملف آخر؟", reply_markup=choice_keyboard)
+                            send_message(chat_id, "📥 **تم استلام ملفك وتحويله للإدارة فوراً!**\nهل تريد تحديد معلوماته أم إرسال ملف آخر؟", reply_markup=choice_keyboard)
                         else:
                             if text:
-                                send_message(chat_id, " أهلاً بك. يمكنك إرسال ملفاتك مباشرة أو الاختيار من القائمة:", reply_markup={
+                                send_message(chat_id, "أهلاً بك. يمكنك إرسال ملفاتك مباشرة أو الاختيار من القائمة:", reply_markup={
                                     "inline_keyboard": [
                                         [{"text": "🏠 القائمة الرئيسية", "callback_data": "main_menu"}]
                                     ]
