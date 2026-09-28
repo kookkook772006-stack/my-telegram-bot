@@ -47,7 +47,7 @@ def webhook():
 
 @app.route("/")
 def index():
-    return "Final Fixed Bot is running smoothly!"
+    return "Bot is running perfectly!"
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -138,40 +138,58 @@ def callback_query(call):
     elif data.startswith("browse_"):
         subj_name = data.replace("browse_", "")
         db = load_db()
-        matched_files = [f for f in db if f["subject"] == subj_name]
+        # عرض الملفات المقبولة فقط للمطالعة
+        matched_files = [f for f in db if f.get("subject") == subj_name and f.get("status") == "approved"]
         
         if matched_files:
             bot.send_message(chat_id, f"📂 **إليك الملفات المتاحة لمقياس ({subj_name}):**")
             for item in matched_files:
-                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}"
-                if item["media_type"] == "document":
-                    bot.send_document(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "audio":
-                    bot.send_audio(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "voice":
-                    bot.send_voice(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "photo":
-                    bot.send_photo(chat_id, item["file_id"], caption=caption)
-                elif item["media_type"] == "video":
-                    bot.send_video(chat_id, item["file_id"], caption=caption)
+                caption = f"📚 المقياس: {subj_name}\n🏷️ النوع: {item['type']}\n👤 مشاركة: {item['sender']}"
+                try:
+                    if item["media_type"] == "document":
+                        bot.send_document(chat_id, item["file_id"], caption=caption)
+                    elif item["media_type"] == "audio":
+                        bot.send_audio(chat_id, item["file_id"], caption=caption)
+                    elif item["media_type"] == "voice":
+                        bot.send_voice(chat_id, item["file_id"], caption=caption)
+                    elif item["media_type"] == "photo":
+                        bot.send_photo(chat_id, item["file_id"], caption=caption)
+                    elif item["media_type"] == "video":
+                        bot.send_video(chat_id, item["file_id"], caption=caption)
+                except Exception as ex:
+                    print(f"Error sending file: {ex}")
         else:
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
-            bot.send_message(chat_id, f"⚠️ **لا توجد ملفات مرفوعة حالياً لمقياس ({subj_name}).**", reply_markup=markup)
+            bot.send_message(chat_id, f"⚠️ **لا توجد ملفات مقبولة حالياً لمقياس ({subj_name}).**", reply_markup=markup)
             
-    elif data.startswith("admin_accept_"):
-        # استخراج معلومات الملف من الكولباك أو تخزينها مؤقته لكي يتم حفظها عند القبول
-        parts = data.split("_")
-        # الصيغة: admin_accept_chatid_subject
-        # سنقوم بحفظ آخر ملف أرسله هذا المستخدم في قاعدة البيانات عند الضغط على قبول
-        orig_chat_id = parts[2]
-        # استرجاع بيانات الملف من الذاكرة المؤقتة للمشرف أو حفظ الملف الذي تمت جدولته
-        bot.answer_callback_query(call.id, "تم قبول ونشر الملف بنجاح ✅")
-        bot.edit_message_text(call.message.text + "\n\n✅ **[تم قبول هذا الملف ونشره رسمياً]**", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
-        
-    elif data == "admin_reject":
+    elif data.startswith("accept_"):
+        file_id_key = data.replace("accept_", "")
+        db = load_db()
+        found = False
+        for item in db:
+            if str(item.get("unique_key")) == file_id_key:
+                item["status"] = "approved"
+                found = True
+                try:
+                    bot.send_message(item["student_chat_id"], f"🎉 **مبروك! تم قبول ونشر ملفك الخاص بمقياس ({item['subject']}) في البوت بنجاح.**")
+                except:
+                    pass
+                break
+        if found:
+            save_db(db)
+            bot.answer_callback_query(call.id, "تم قبول ونشر الملف بنجاح ✅")
+            bot.edit_message_text(call.message.text + "\n\n✅ **[تم قبول هذا الملف ونشره في البوت بنجاح]**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
+        else:
+            bot.answer_callback_query(call.id, "الملف غير موجود أو تم التعامل معه مسبقاً ⚠️", show_alert=True)
+            
+    elif data.startswith("reject_"):
+        file_id_key = data.replace("reject_", "")
+        db = load_db()
+        db = [item for item in db if str(item.get("unique_key")) != file_id_key]
+        save_db(db)
         bot.answer_callback_query(call.id, "تم رفض الملف ❌")
-        bot.edit_message_text(call.message.text + "\n\n❌ **[تم رفض هذا الملف وحذفه]**", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
+        bot.edit_message_text(call.message.text + "\n\n❌ **[تم رفض هذا الملف وحذفه]**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
         
     elif data == "main_menu":
         user_states[chat_id] = {}
@@ -222,6 +240,23 @@ def handle_files(message):
         media_type = "video"
         file_id = message.video.file_id
         
+    unique_key = str(message.message_id)
+    
+    # حفظ الملف في القاعدة بحالة قيد الانتظار pending
+    db = load_db()
+    new_item = {
+        "unique_key": unique_key,
+        "subject": subj,
+        "file_id": file_id,
+        "media_type": media_type,
+        "type": f_type,
+        "sender": username,
+        "student_chat_id": chat_id,
+        "status": "pending"
+    }
+    db.append(new_item)
+    save_db(db)
+    
     caption = (
         f"📥 **طلب مشاركة جديد للمراجعة:**\n\n"
         f"📚 المقياس: {subj}\n"
@@ -230,22 +265,11 @@ def handle_files(message):
         f"👤 الطالب: {username} (ID: `{chat_id}`)"
     )
     
-    # حفظ الملف في قاعدة البيانات فوراً عند الضغط على قبول في مجموعة الإدارة يتم ربطه
-    # سنقوم بتعديل زر القبول ليحفظ البيانات مباشرة في database.json
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(
-        telebot.types.InlineKeyboardButton("✅ قبول ونشر", callback_data=f"accept_file"),
-        telebot.types.InlineKeyboardButton("❌ رفض وحذف", callback_data="admin_reject")
+        telebot.types.InlineKeyboardButton("✅ قبول ونشر", callback_data=f"accept_{unique_key}"),
+        telebot.types.InlineKeyboardButton("❌ رفض وحذف", callback_data=f"reject_{unique_key}")
     )
-    
-    # حفظ مؤقت لبيانات الملف الحالي لكي يتم حفظه عند ضغط المشرف "قبول ونشر"
-    user_states[f"pending_admin_{chat_id}"] = {
-        "subject": subj,
-        "file_id": file_id,
-        "media_type": media_type,
-        "type": f_type,
-        "sender": username
-    }
     
     try:
         bot.forward_message(chat_id=ADMIN_GROUP, from_chat_id=chat_id, message_id=message.message_id)
@@ -261,18 +285,6 @@ def handle_files(message):
     except Exception as e:
         print(f"Error forwarding: {e}")
         bot.send_message(chat_id, "✅ **تم إرسال الملف للمجموعة بنجاح.**")
-
-# دالة مخصصة لزر القبول في مجموعة الإدارة لحفظ الملف في قاعدة البيانات الدائمة
-@bot.callback_query_handler(func=lambda call: call.data == "accept_file")
-def accept_file_handler(call):
-    # البحث عن أحدث ملف معلق وحفظه في database.json
-    db = load_db()
-    # نضيف الملف للقاعدة
-    bot.answer_callback_query(call.id, "تم قبول ونشر الملف بنجاح ✅")
-    bot.edit_message_text(call.message.text + "\n\n✅ **[تم قبول هذا الملف ونشره في البوت بنجاح]**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
-    
-    # ملاحظة: تم ربط حفظ الملف في قاعدة البيانات الآن ليظهر للطلاب عند التصفح فوراً
-    bot.send_message(call.message.chat.id, "📢 تم تحديث قاعدة بيانات البوت وإضافة الملف للمقياس المخصص.")
 
 if __name__ == "__main__":
     RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
