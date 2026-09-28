@@ -27,7 +27,7 @@ CHANNEL_ID = "@m388393"
 processed_updates = set()
 last_update_id = 0
 
-print("Direct Forward Student Bot started...")
+print("Student Bot with Sender Info started...")
 
 def send_message(chat_id, text):
     payload = {"chat_id": chat_id, "text": text}
@@ -38,19 +38,22 @@ def send_message(chat_id, text):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def forward_message(chat_id, message_id):
-    # استخدام forwardMessage لإعادة توجيه الرسالة بكل محتواها (ملف، صوت، صورة...) مع حفظ اسم المرسل الأصلي في التيليجرام
+def copy_message_with_sender(chat_id, message_id, sender_info):
+    # استخدام copyMessage يتيح لنا إضافة كابشن يوضح اسم المرسل بدقة فوق الملف أو الصورة
+    caption = f"📄 مشاركة جديدة:\n👤 المرسل: {sender_info}"
+    
     payload = {
         "chat_id": CHANNEL_ID,
         "from_chat_id": chat_id,
-        "message_id": message_id
+        "message_id": message_id,
+        "caption": caption
     }
     data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(f"{URL}/forwardMessage", data=data, headers={'Content-Type': 'application/json'})
+    req = urllib.request.Request(f"{URL}/copyMessage", data=data, headers={'Content-Type': 'application/json'})
     try:
         urllib.request.urlopen(req)
     except Exception as e:
-        print(f"Error forwarding message: {e}")
+        print(f"Error copying message: {e}")
 
 while True:
     try:
@@ -73,22 +76,32 @@ while True:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
                         
-                        # استقبال الرسائل من المحادثات الخاصة فقط
                         if msg["chat"]["type"] != "private":
                             continue
                             
                         text = msg.get("text", "")
                         
-                        # أمر البدء
                         if text == "/start":
-                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\n\nأرسل أي ملف، صوت، صورة، أو نص، وسأقوم بإعادة توجيهه إلى القناة مباشرة وفوراً دون أي خطوات معقدة:")
+                            send_message(chat_id, "حياك الله! 📚\nأهلاً بك في بوت استقبال مشاركات الطلبة.\n\nأرسل أي ملف، صوت، صورة، أو نص، وسأقوم بنقله إلى القناة مع حفظ اسمك:")
                             continue
                         
-                        # إعادة توجيه أي شي يرسله المستخدم (ملف، ميديا، نص) بحذافيره إلى القناة
-                        forward_message(chat_id, msg["message_id"])
+                        # استخراج معلومات المرسل (الاسم أو المعرف)
+                        user = msg.get("from", {})
+                        first_name = user.get("first_name", "")
+                        username = user.get("username", "")
                         
-                        # تأكيد وصول للمستخدم
-                        send_message(chat_id, "✅ جزاك الله خيراً! تم إرسال مشاركتك إلى القناة بنجاح.")
+                        if username:
+                            sender_info = f"@{username}"
+                        elif first_name:
+                            sender_info = f"{first_name} (بدون معرف)"
+                        else:
+                            sender_info = "مجهول"
+                        
+                        # إعادة نشر الرسالة مع إرفاق اسم المرسل في القناة
+                        copy_message_with_sender(chat_id, msg["message_id"], sender_info)
+                        
+                        # رد تأكيد للمرسل في الخاص
+                        send_message(chat_id, "✅ جزاك الله خيراً! تم إرسال مشاركتك إلى القناة مع اسمك بنجاح.")
                             
     except Exception as e:
         print(f"Error: {e}")
